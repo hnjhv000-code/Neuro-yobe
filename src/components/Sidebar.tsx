@@ -3,6 +3,7 @@ import {
   Home,
   Compass,
   Tv,
+  Bell,
   History,
   ThumbsUp,
   Clock,
@@ -59,6 +60,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'home', label: t('home'), icon: Home },
     { id: 'shorts', label: t('shorts'), icon: Compass },
     { id: 'subscriptions', label: t('subscriptions'), icon: Tv },
+    { id: 'notifications', label: t('notifications'), icon: Bell },
   ];
 
   const libraryNavItems = [

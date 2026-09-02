@@ -14,6 +14,8 @@ import { ChannelView } from './components/ChannelView';
 import { SupportModal } from './components/SupportModal';
 import { PlaylistsModal } from './components/PlaylistsModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
+import { NotificationsView } from './components/NotificationsView';
+import { NotificationDetailModal } from './components/NotificationDetailModal';
 import { AboutUsView } from './components/AboutUsView';
 import { PrivacyView } from './components/PrivacyView';
 import { ToastProvider, useToast } from './components/Toast';
@@ -193,6 +195,7 @@ export const AppContent: React.FC = () => {
   const [showDeveloperPanel, setShowDeveloperPanel] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [showPlaylistsModal, setShowPlaylistsModal] = useState(false);
+  const [selectedNotificationForDetail, setSelectedNotificationForDetail] = useState<NotificationItem | null>(null);
 
   // Real-time Firebase data collections (instantly loaded from cache/starters)
   const [allVideos, setAllVideos] = useState<VideoItem[]>(() => getCachedVideos());
@@ -1046,6 +1049,19 @@ export const AppContent: React.FC = () => {
             </div>
           )}
 
+          {/* VIEW: NOTIFICATIONS (خانة الإشعارات المخصصة بالكامل) */}
+          {currentRoute === 'notifications' && (
+            <NotificationsView
+              notifications={notifications}
+              allVideos={allVideos}
+              language={language}
+              currentUser={currentUser}
+              onNavigateBack={() => setCurrentRoute('home')}
+              onSelectVideo={(v) => setActiveVideo(v)}
+              onOpenNotificationDetail={(notif) => setSelectedNotificationForDetail(notif)}
+            />
+          )}
+
           {/* VIEW: ABOUT US (من نحن) */}
           {currentRoute === 'about' && (
             <AboutUsView
@@ -1236,6 +1252,20 @@ export const AppContent: React.FC = () => {
             setShowPlaylistsModal(false);
             setPlaylistVideoToAdd(null);
           }}
+        />
+      )}
+
+      {/* MODAL 8: Notification Detail Dedicated Modal */}
+      {selectedNotificationForDetail && (
+        <NotificationDetailModal
+          notification={selectedNotificationForDetail}
+          onClose={() => setSelectedNotificationForDetail(null)}
+          language={language}
+          onSelectVideo={(v) => {
+            setSelectedNotificationForDetail(null);
+            setActiveVideo(v);
+          }}
+          allVideos={allVideos}
         />
       )}
 

@@ -358,10 +358,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                   if (!currentUser) {
                     onOpenAuth();
                   } else {
-                    // Mobile responsiveness: If on mobile screens (< 640px), open dedicated mobile drawer
+                    // On mobile: smoothly navigate to the full screen dedicated Notifications view
                     if (typeof window !== 'undefined' && window.innerWidth < 640) {
-                      setShowMobileNotifications(true);
                       setShowNotifications(false);
+                      onNavigate('notifications');
                     } else {
                       setShowNotifications(!showNotifications);
                     }
@@ -451,6 +451,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                         </div>
                       ))
                     )}
+                  </div>
+
+                  {/* Open in Dedicated Full-Screen View button */}
+                  <div className="p-2 border-t border-cyan-950/80 bg-[#070e1c]/90">
+                    <button
+                      onClick={() => {
+                        setShowNotifications(false);
+                        onNavigate('notifications');
+                      }}
+                      className="w-full py-2 px-3 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 text-xs font-bold text-center border border-cyan-800/40 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Bell className="w-3.5 h-3.5" />
+                      <span>{t('openNotificationsPage', 'فتح صندوق الإشعارات بالكامل')}</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -590,11 +604,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <button
                         onClick={() => {
                           setShowUserMenu(false);
-                          if (typeof window !== 'undefined' && window.innerWidth < 640) {
-                            setShowMobileNotifications(true);
-                          } else {
-                            setShowNotifications(true);
-                          }
+                          onNavigate('notifications');
                         }}
                         className="w-full text-start px-3.5 py-2 text-xs text-slate-200 hover:bg-cyan-950/50 hover:text-cyan-200 transition-colors flex items-center justify-between cursor-pointer font-medium"
                       >
