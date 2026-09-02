@@ -14,6 +14,8 @@ import { ChannelView } from './components/ChannelView';
 import { SupportModal } from './components/SupportModal';
 import { PlaylistsModal } from './components/PlaylistsModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
+import { AboutUsView } from './components/AboutUsView';
+import { PrivacyView } from './components/PrivacyView';
 import { ToastProvider, useToast } from './components/Toast';
 
 import {
@@ -82,8 +84,27 @@ export const AppContent: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // App State & Preferences (Theme saved in localStorage)
-  const [language, setLanguage] = useState<Language>('ar');
+  // App State & Preferences (Language auto-detected from browser or saved in localStorage)
+  const [language, setLanguage] = useState<Language>(() => {
+    try {
+      const saved = localStorage.getItem('yassa_language') || localStorage.getItem('neuroyobe_language');
+      if (saved && ['ar', 'en', 'fr', 'ja', 'zh'].includes(saved)) {
+        return saved as Language;
+      }
+      // Auto-detect from browser locale
+      const browserLangs = navigator.languages ? [...navigator.languages] : [navigator.language || ''];
+      for (const rawLang of browserLangs) {
+        const code = (rawLang || '').toLowerCase();
+        if (code.startsWith('ar')) return 'ar';
+        if (code.startsWith('en')) return 'en';
+        if (code.startsWith('fr')) return 'fr';
+        if (code.startsWith('ja')) return 'ja';
+        if (code.startsWith('zh')) return 'zh';
+      }
+    } catch {}
+    return 'ar';
+  });
+
   const [isDarkTheme, setIsDarkTheme] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('yassa_theme');
@@ -97,6 +118,47 @@ export const AppContent: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Sync language with DOM, localStorage, and dynamic Google SEO Meta tags
+  useEffect(() => {
+    try {
+      localStorage.setItem('yassa_language', language);
+      localStorage.setItem('neuroyobe_language', language);
+    } catch {}
+
+    // HTML tag lang and direction
+    document.documentElement.lang = language;
+    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+
+    // Dynamic SEO Title & Description for Google across 5 languages
+    const dynamicTitle = getTranslation(language, 'metaTitle');
+    const dynamicDesc = getTranslation(language, 'metaDesc');
+
+    document.title = dynamicTitle;
+
+    const descMeta = document.querySelector('meta[name="description"]');
+    if (descMeta) {
+      descMeta.setAttribute('content', dynamicDesc);
+    }
+    const ogTitleMeta = document.querySelector('meta[property="og:title"]');
+    if (ogTitleMeta) {
+      ogTitleMeta.setAttribute('content', dynamicTitle);
+    }
+    const ogDescMeta = document.querySelector('meta[property="og:description"]');
+    if (ogDescMeta) {
+      ogDescMeta.setAttribute('content', dynamicDesc);
+    }
+    const twitterTitleMeta = document.querySelector('meta[name="twitter:title"]');
+    if (twitterTitleMeta) {
+      twitterTitleMeta.setAttribute('content', dynamicTitle);
+    }
+    const twitterDescMeta = document.querySelector('meta[name="twitter:description"]');
+    if (twitterDescMeta) {
+      twitterDescMeta.setAttribute('content', dynamicDesc);
+    }
+  }, [language]);
+
+  // Sync theme with DOM and localStorage
 
   // Sync theme with DOM and localStorage
   useEffect(() => {
@@ -986,31 +1048,28 @@ export const AppContent: React.FC = () => {
 
           {/* VIEW: ABOUT US (من نحن) */}
           {currentRoute === 'about' && (
-            <div className="max-w-2xl mx-auto p-6 rounded-3xl bg-[#091224] border border-cyan-950 space-y-4 text-xs text-slate-300 leading-relaxed">
-              <div className="flex items-center gap-2 text-cyan-300 font-bold text-base">
-                <Info className="w-5 h-5" />
-                <span>{t('aboutUsTitle')}</span>
-              </div>
-              <p>
-                <strong>{t('siteName')}</strong> {t('tagline')}
-              </p>
-            </div>
+            <AboutUsView
+              language={language}
+              onNavigateHome={() => setCurrentRoute('home')}
+              onNavigatePrivacy={() => setCurrentRoute('privacy')}
+              onNavigateSupport={() => {
+                if (!currentUser) setShowAuthModal(true);
+                else setShowSupportModal(true);
+              }}
+            />
           )}
 
           {/* VIEW: PRIVACY & TERMS (الخصوصية والأمان) */}
           {currentRoute === 'privacy' && (
-            <div className="max-w-2xl mx-auto p-6 rounded-3xl bg-[#091224] border border-cyan-950 space-y-4 text-xs text-slate-300 leading-relaxed">
-              <div className="flex items-center gap-2 text-cyan-300 font-bold text-base">
-                <ShieldCheck className="w-5 h-5" />
-                <span>{t('privacyTitle')}</span>
-              </div>
-              <p>
-                {t('guestBanner')}
-              </p>
-              <p>
-                {t('copyrightText')}
-              </p>
-            </div>
+            <PrivacyView
+              language={language}
+              onNavigateHome={() => setCurrentRoute('home')}
+              onNavigateAbout={() => setCurrentRoute('about')}
+              onNavigateSupport={() => {
+                if (!currentUser) setShowAuthModal(true);
+                else setShowSupportModal(true);
+              }}
+            />
           )}
 
           {/* VIEW: SETTINGS (إعدادات الحساب) */}
