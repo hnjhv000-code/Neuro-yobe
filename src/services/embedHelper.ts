@@ -7,7 +7,7 @@ export interface ParsedVideoInfo {
   isEmbed: boolean;
   embedUrl?: string;
   directUrl?: string;
-  provider: 'youtube' | 'tiktok' | 'facebook' | 'instagram' | 'vimeo' | 'dailymotion' | 'direct' | 'unknown';
+  provider: 'youtube' | 'tiktok' | 'facebook' | 'instagram' | 'vimeo' | 'dailymotion' | 'googledrive' | 'direct' | 'unknown';
 }
 
 export function parseVideoUrl(rawUrl: string): ParsedVideoInfo {
@@ -87,7 +87,20 @@ export function parseVideoUrl(rawUrl: string): ParsedVideoInfo {
     };
   }
 
-  // 7. Direct video formats (.mp4, .webm, .ogg, .m3u8)
+  // 7. Google Drive Video
+  // Matches drive.google.com/file/d/FILE_ID, drive.google.com/open?id=FILE_ID, docs.google.com/file/d/FILE_ID
+  const driveMatch1 = url.match(/(?:drive|docs)\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/i);
+  const driveMatch2 = url.match(/(?:drive|docs)\.google\.com\/.*[?&]id=([a-zA-Z0-9_-]+)/i);
+  const driveId = (driveMatch1 && driveMatch1[1]) || (driveMatch2 && driveMatch2[1]);
+  if (driveId) {
+    return {
+      isEmbed: true,
+      embedUrl: `https://drive.google.com/file/d/${driveId}/preview`,
+      provider: 'googledrive',
+    };
+  }
+
+  // 8. Direct video formats (.mp4, .webm, .ogg, .m3u8)
   if (/\.(mp4|webm|ogg|m3u8)(\?.*)?$/i.test(url) || url.startsWith('blob:') || url.startsWith('data:video/')) {
     return {
       isEmbed: false,

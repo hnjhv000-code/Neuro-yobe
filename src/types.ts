@@ -1,5 +1,5 @@
 export type VideoType = 'video' | 'short';
-export type VideoSource = 'file' | 'external';
+export type VideoSource = 'file' | 'external' | 'google_drive';
 export type VideoVisibility = 'public' | 'private' | 'scheduled' | 'unlisted';
 export type PostType = 'text' | 'image' | 'poll_text' | 'poll_image' | 'news';
 export type SupportStatus = 'open' | 'answered' | 'rejected';
@@ -44,6 +44,7 @@ export interface VideoItem {
   scheduledAt?: number;
   category?: string;
   externalUrl?: string;
+  driveFileId?: string;
   videoDataUrl?: string; // For small sample/compressed direct videos
   fileBlobKey?: string; // IndexedDB reference for device videos
   thumbnailDataUrl: string;

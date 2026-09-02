@@ -778,6 +778,7 @@ export async function createVideo(videoData: Omit<VideoItem, 'id'>): Promise<str
   const fullVideo: VideoItem = {
     ...videoData,
     id,
+    fileBlobKey: videoData.fileBlobKey || (videoData.source === 'file' ? id : undefined),
     views: videoData.views || 0,
     likes: videoData.likes || 0,
     dislikes: videoData.dislikes || 0,
@@ -947,6 +948,7 @@ export async function updateVideo(videoId: string, fields: Partial<VideoItem>): 
 
 export async function deleteVideo(videoId: string, publisherUid?: string, reasonNotice?: string): Promise<void> {
   await remove(ref(db, `videos/${videoId}`));
+  await remove(ref(db, `videoMedia/${videoId}`)).catch(() => {});
   // If removed by developer due to violation, send notification to publisher
   if (publisherUid && reasonNotice) {
     await sendNotification({
@@ -962,11 +964,13 @@ export async function deleteVideo(videoId: string, publisherUid?: string, reason
 
 export async function deleteAllVideos(): Promise<void> {
   await remove(ref(db, 'videos'));
+  await remove(ref(db, 'videoMedia')).catch(() => {});
 }
 
 export async function wipeAllSiteContentAndVideos(): Promise<void> {
   try {
     await remove(ref(db, 'videos'));
+    await remove(ref(db, 'videoMedia')).catch(() => {});
     await remove(ref(db, 'posts'));
     await remove(ref(db, 'comments'));
     await remove(ref(db, 'user_history'));
@@ -977,6 +981,194 @@ export async function wipeAllSiteContentAndVideos(): Promise<void> {
     await remove(ref(db, 'notifications'));
   } catch (err) {
     console.warn("Wipe Firebase data notice:", err);
+  }
+}
+
+/* =========================================================================
+   DIRECT FIREBASE DATA VIDEO STORAGE (NO FIREBASE STORAGE / NO LOCAL STORAGE)
+   Stores uploaded videos directly into Firebase Database as chunked data!
+   ========================================================================= */
+
+// In-memory cache for resolved Blob URLs to prevent repeated network fetching
+const resolvedFirebaseBlobUrlCache = new Map<string, string>();
+
+export interface VideoUploadProgress {
+  percent: number;
+  loadedBytes: number;
+  totalBytes: number;
+  stage: string;
+}
+
+export async function uploadVideoDataToFirebase(
+  videoId: string,
+  file: File,
+  onProgress?: (progress: VideoUploadProgress) => void
+): Promise<string> {
+  onProgress?.({
+    percent: 5,
+    loadedBytes: 0,
+    totalBytes: file.size,
+    stage: 'جاري قراءة وتشفير بيانات الفيديو من جهازك...'
+  });
+
+  // Read file as Base64 DataURL
+  const base64Data = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('فشل قراءة ملف الفيديو من الجهاز'));
+    reader.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) {
+        const p = Math.min(28, Math.round((e.loaded / e.total) * 28));
+        onProgress?.({
+          percent: p,
+          loadedBytes: e.loaded,
+          totalBytes: e.total,
+          stage: `قراءة بيانات الفيديو (${Math.round((e.loaded / (1024 * 1024)) * 10) / 10} MB / ${Math.round((e.total / (1024 * 1024)) * 10) / 10} MB)...`
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+
+  onProgress?.({
+    percent: 30,
+    loadedBytes: file.size,
+    totalBytes: file.size,
+    stage: 'تقسيم بيانات الفيديو إلى حزم سحابية آمنة في فايربيس...'
+  });
+
+  // Chunk size: 350,000 chars (~260 KB) per node write to ensure smooth Firebase Realtime Database writes
+  const CHUNK_SIZE = 350000;
+  const totalChunks = Math.ceil(base64Data.length / CHUNK_SIZE);
+
+  // Write metadata to Firebase RTDB
+  const metaRef = ref(db, `videoMedia/${videoId}/meta`);
+  await set(metaRef, {
+    videoId,
+    totalChunks,
+    totalSize: file.size,
+    mimeType: file.type || 'video/mp4',
+    fileName: file.name,
+    createdAt: Date.now()
+  });
+
+  // Write each chunk sequentially to Firebase RTDB with progress tracking
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, base64Data.length);
+    const chunk = base64Data.substring(start, end);
+
+    const chunkRef = ref(db, `videoMedia/${videoId}/chunks/${i}`);
+    await set(chunkRef, chunk);
+
+    const currentPercent = Math.min(98, 30 + Math.round(((i + 1) / totalChunks) * 68));
+    const approximateLoaded = Math.min(file.size, Math.round(((i + 1) / totalChunks) * file.size));
+
+    onProgress?.({
+      percent: currentPercent,
+      loadedBytes: approximateLoaded,
+      totalBytes: file.size,
+      stage: `جاري رفع حزم الفيديو إلى قاعدة بيانات فايربيس (${i + 1}/${totalChunks})...`
+    });
+  }
+
+  // Update video record in Firebase: marks media as stored in Firebase cloud data
+  const videoRef = ref(db, `videos/${videoId}`);
+  const updatePayload: Record<string, any> = {
+    hasFirebaseMedia: true,
+    fileBlobKey: videoId
+  };
+
+  // If payload is relatively small (< 1.5MB), also cache direct dataUrl on video object for instant playback
+  if (base64Data.length < 2000000) {
+    updatePayload.videoDataUrl = base64Data;
+  }
+
+  await update(videoRef, updatePayload).catch(() => {});
+
+  // Cache in-memory for the current uploader immediately
+  try {
+    const blob = await (await fetch(base64Data)).blob();
+    const objectUrl = URL.createObjectURL(blob);
+    resolvedFirebaseBlobUrlCache.set(videoId, objectUrl);
+  } catch {
+    resolvedFirebaseBlobUrlCache.set(videoId, base64Data);
+  }
+
+  onProgress?.({
+    percent: 100,
+    loadedBytes: file.size,
+    totalBytes: file.size,
+    stage: 'تم اكتمال الرفع وحفظ الفيديو في فايربيس بنجاح كبيانات سحابية!'
+  });
+
+  return videoId;
+}
+
+export async function getVideoDataFromFirebase(videoId: string): Promise<string | null> {
+  if (!videoId) return null;
+
+  // Check in-memory cache first
+  if (resolvedFirebaseBlobUrlCache.has(videoId)) {
+    return resolvedFirebaseBlobUrlCache.get(videoId)!;
+  }
+
+  try {
+    // 1. Check if direct videoDataUrl is already present on the video document
+    const videoRef = ref(db, `videos/${videoId}`);
+    const videoSnap = await get(videoRef);
+    if (videoSnap.exists()) {
+      const v = videoSnap.val() as VideoItem;
+      if (v.videoDataUrl && v.videoDataUrl.startsWith('data:video/')) {
+        try {
+          const resp = await fetch(v.videoDataUrl);
+          const blob = await resp.blob();
+          const objectUrl = URL.createObjectURL(blob);
+          resolvedFirebaseBlobUrlCache.set(videoId, objectUrl);
+          return objectUrl;
+        } catch {
+          resolvedFirebaseBlobUrlCache.set(videoId, v.videoDataUrl);
+          return v.videoDataUrl;
+        }
+      }
+    }
+
+    // 2. Fetch chunked media from Firebase RTDB `videoMedia/${videoId}`
+    const metaRef = ref(db, `videoMedia/${videoId}/meta`);
+    const metaSnap = await get(metaRef);
+    if (!metaSnap.exists()) {
+      return null;
+    }
+
+    const meta = metaSnap.val();
+    const totalChunks = meta.totalChunks || 0;
+    if (totalChunks <= 0) return null;
+
+    const chunksRef = ref(db, `videoMedia/${videoId}/chunks`);
+    const chunksSnap = await get(chunksRef);
+    if (!chunksSnap.exists()) return null;
+
+    const chunksData = chunksSnap.val();
+    const chunksArray: string[] = [];
+    for (let i = 0; i < totalChunks; i++) {
+      const chunk = chunksData[i] || chunksData[`${i}`];
+      if (chunk) {
+        chunksArray.push(chunk);
+      }
+    }
+
+    const fullBase64 = chunksArray.join('');
+    if (!fullBase64) return null;
+
+    // Convert to Blob Object URL for smooth native video player rendering
+    const response = await fetch(fullBase64);
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    resolvedFirebaseBlobUrlCache.set(videoId, objectUrl);
+    return objectUrl;
+  } catch (err) {
+    console.error("Failed to load video data from Firebase:", err);
+    return null;
   }
 }
 
@@ -1761,6 +1953,19 @@ export const clearWatchHistory = clearAllUserHistory;
 // Cache IP & Geo info in memory and sessionStorage to avoid repeating external calls
 let cachedGeoInfo: { ip: string; country: string; countryCode: string; city: string; flagEmoji: string } | null = null;
 
+function getCountryFlag(countryCode: string): string {
+  if (!countryCode || countryCode.length !== 2) return '🌐';
+  try {
+    const codePoints = countryCode
+      .toUpperCase()
+      .split('')
+      .map((c) => 127397 + c.charCodeAt(0));
+    return String.fromCodePoint(...codePoints);
+  } catch {
+    return '🌐';
+  }
+}
+
 export async function getVisitorGeoInfo(): Promise<{ ip: string; country: string; countryCode: string; city: string; flagEmoji: string }> {
   if (cachedGeoInfo) return cachedGeoInfo;
 
@@ -1768,25 +1973,26 @@ export async function getVisitorGeoInfo(): Promise<{ ip: string; country: string
     const saved = sessionStorage.getItem('neuro_visitor_geo_info');
     if (saved) {
       cachedGeoInfo = JSON.parse(saved);
-      if (cachedGeoInfo) return cachedGeoInfo;
+      if (cachedGeoInfo && cachedGeoInfo.ip && cachedGeoInfo.ip !== 'مجهول') return cachedGeoInfo;
     }
   } catch {}
 
-  // Attempt to fetch from ipwho.is (free, https, gives flag, country, city)
+  // Provider 1: freeipapi.com (Fast & HTTPS)
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
-    const res = await fetch('https://ipwho.is/', { signal: controller.signal });
+    const timeoutId = setTimeout(() => controller.abort(), 2800);
+    const res = await fetch('https://freeipapi.com/api/json', { signal: controller.signal });
     clearTimeout(timeoutId);
     if (res.ok) {
       const data = await res.json();
-      if (data && data.success !== false) {
+      if (data && data.ipAddress) {
+        const flag = getCountryFlag(data.countryCode || '');
         cachedGeoInfo = {
-          ip: data.ip || 'غير معروف',
-          country: data.country || 'غير معروف',
-          countryCode: data.country_code || '',
-          city: data.city || '',
-          flagEmoji: data.flag?.emoji || '🌐'
+          ip: data.ipAddress,
+          country: data.countryName || 'غير محدد',
+          countryCode: data.countryCode || '',
+          city: data.cityName || '',
+          flagEmoji: flag
         };
         try {
           sessionStorage.setItem('neuro_visitor_geo_info', JSON.stringify(cachedGeoInfo));
@@ -1796,21 +2002,45 @@ export async function getVisitorGeoInfo(): Promise<{ ip: string; country: string
     }
   } catch {}
 
-  // Fallback to api.ipify.org
+  // Provider 2: ipwho.is
   try {
-    const controller2 = new AbortController();
-    const timeoutId2 = setTimeout(() => controller2.abort(), 2500);
-    const res2 = await fetch('https://api.ipify.org?format=json', { signal: controller2.signal });
-    clearTimeout(timeoutId2);
-    if (res2.ok) {
-      const data2 = await res2.json();
-      if (data2 && data2.ip) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2800);
+    const res = await fetch('https://ipwho.is/', { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success !== false && data.ip) {
         cachedGeoInfo = {
-          ip: data2.ip,
-          country: 'غير محدد',
-          countryCode: '',
+          ip: data.ip,
+          country: data.country || 'غير محدد',
+          countryCode: data.country_code || '',
+          city: data.city || '',
+          flagEmoji: data.flag?.emoji || getCountryFlag(data.country_code || '')
+        };
+        try {
+          sessionStorage.setItem('neuro_visitor_geo_info', JSON.stringify(cachedGeoInfo));
+        } catch {}
+        return cachedGeoInfo;
+      }
+    }
+  } catch {}
+
+  // Provider 3: Fallback country.is
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch('https://api.country.is/', { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.ip) {
+        cachedGeoInfo = {
+          ip: data.ip,
+          country: data.country || 'غير محدد',
+          countryCode: data.country || '',
           city: '',
-          flagEmoji: '🌐'
+          flagEmoji: getCountryFlag(data.country || '')
         };
         try {
           sessionStorage.setItem('neuro_visitor_geo_info', JSON.stringify(cachedGeoInfo));
@@ -1904,7 +2134,7 @@ export async function trackVisitorSession(currentUser?: UserProfile | null): Pro
   const todayDateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   const thisMonthStr = todayDateStr.substring(0, 7); // YYYY-MM
 
-  // Check if this browser tab/session already initiated a visit
+  // Check if session token exists in sessionStorage to manage session state
   let isNewSession = false;
   try {
     if (!sessionStorage.getItem('neuro_active_session_token')) {
@@ -1916,15 +2146,24 @@ export async function trackVisitorSession(currentUser?: UserProfile | null): Pro
   }
 
   try {
-    // 1. Fetch IP and Geolocation
-    const geo = await getVisitorGeoInfo();
-
-    // 2. Fetch existing visitor record
+    // 1. Fetch existing visitor record
     const snap = await get(visitorRef);
-    const existing = snap.exists() ? (snap.val() as VisitorRecord) : null;
+    const existing = snap.exists() ? (snap.val() as any) : null;
+
+    const visitsCount = existing ? (Number(existing.visitsCount || 1) + (isNewSession ? 1 : 0)) : 1;
+
+    // Build session item
+    const newSessionItem = {
+      id: 'sess_' + now,
+      action: currentUser ? 'login' : 'enter',
+      timestamp: now,
+      details: currentUser
+        ? `تسجيل دخول: ${currentUser.username || currentUser.email} عبر ${deviceName}`
+        : `دخول المنصة عبر ${deviceName}`
+    };
 
     if (!existing) {
-      const initialRecord: VisitorRecord = {
+      const initialRecord: Record<string, any> = {
         id: visitorId,
         userUid: currentUser?.uid || '',
         userName: currentUser?.username || '',
@@ -1934,43 +2173,24 @@ export async function trackVisitorSession(currentUser?: UserProfile | null): Pro
         deviceName,
         os,
         browser,
-        ip: geo.ip,
-        country: geo.country,
-        countryCode: geo.countryCode,
-        city: geo.city,
-        flagEmoji: geo.flagEmoji,
+        ip: cachedGeoInfo?.ip || 'جاري التحديد...',
+        country: cachedGeoInfo?.country || 'غير محدد',
+        countryCode: cachedGeoInfo?.countryCode || '',
+        city: cachedGeoInfo?.city || '',
+        flagEmoji: cachedGeoInfo?.flagEmoji || '🌐',
         screenResolution,
         language,
         firstVisitAt: now,
         lastVisitAt: now,
         visitsCount: 1,
         isBanned: false,
-        watchedVideos: [],
-        sessions: [
-          {
-            id: 'sess_' + now,
-            action: currentUser ? 'login' : 'enter',
-            timestamp: now,
-            details: `دخول الموقع عبر ${deviceName} - IP: ${geo.ip} (${geo.country || 'موقع غير محدد'})`
-          }
-        ]
+        sessions: {
+          ['sess_' + now]: newSessionItem
+        }
       };
       await set(visitorRef, sanitizeForFirebase(initialRecord));
     } else {
-      const updatedSessions = existing.sessions || [];
-      if (isNewSession) {
-        updatedSessions.push({
-          id: 'sess_' + now,
-          action: currentUser ? 'login' : 'enter',
-          timestamp: now,
-          details: `جلسة زيارة جديدة (${deviceName}) - IP: ${geo.ip}`
-        });
-        if (updatedSessions.length > 50) updatedSessions.shift();
-      }
-
-      const visitsCount = isNewSession ? (existing.visitsCount || 0) + 1 : (existing.visitsCount || 1);
-
-      await update(visitorRef, sanitizeForFirebase({
+      const updatePayload: Record<string, any> = {
         userUid: currentUser?.uid || existing.userUid || '',
         userName: currentUser?.username || existing.userName || '',
         email: currentUser?.email || existing.email || '',
@@ -1982,58 +2202,77 @@ export async function trackVisitorSession(currentUser?: UserProfile | null): Pro
         browser,
         deviceType,
         screenResolution: screenResolution || existing.screenResolution || '',
-        language: language || existing.language || 'ar',
-        ip: geo.ip && geo.ip !== 'مجهول' ? geo.ip : (existing.ip || 'مجهول'),
-        country: geo.country && geo.country !== 'غير محدد' ? geo.country : (existing.country || 'غير محدد'),
-        countryCode: geo.countryCode || existing.countryCode || '',
-        city: geo.city || existing.city || '',
-        flagEmoji: geo.flagEmoji || existing.flagEmoji || '🌐',
-        sessions: updatedSessions
-      }));
+        language: language || existing.language || 'ar'
+      };
+
+      if (isNewSession) {
+        // Add session to sessions object in RTDB
+        const sessionRef = ref(db, `visitors/${visitorId}/sessions/sess_${now}`);
+        await set(sessionRef, sanitizeForFirebase(newSessionItem));
+      }
+
+      await update(visitorRef, sanitizeForFirebase(updatePayload));
     }
 
-    // 3. Atomically update global visitor stats (only on new sessions)
-    if (isNewSession) {
-      const statsRef = ref(db, 'visitor_stats/global');
-      await runTransaction(statsRef, (currentData) => {
-        const stats = currentData || {
-          dailyCount: 0,
-          monthlyCount: 0,
-          totalCount: 0,
-          lastDailyDate: todayDateStr,
-          lastMonthlyDate: thisMonthStr,
-          dailyResetAt: now,
-          monthlyResetAt: now
-        };
+    // 2. Atomically update global visitor stats (always updates count accurately)
+    const statsRef = ref(db, 'visitor_stats/global');
+    await runTransaction(statsRef, (currentData) => {
+      const stats = currentData || {
+        dailyCount: 0,
+        monthlyCount: 0,
+        totalCount: 0,
+        lastDailyDate: todayDateStr,
+        lastMonthlyDate: thisMonthStr,
+        dailyResetAt: now,
+        monthlyResetAt: now
+      };
 
-        let daily = Number(stats.dailyCount || 0);
-        let monthly = Number(stats.monthlyCount || 0);
-        let total = Number(stats.totalCount || 0);
+      let daily = Number(stats.dailyCount || 0);
+      let monthly = Number(stats.monthlyCount || 0);
+      let total = Number(stats.totalCount || 0);
 
-        // Daily reset if date changed
-        if (stats.lastDailyDate && stats.lastDailyDate !== todayDateStr) {
-          daily = 0;
-        }
-        // Monthly reset if month changed
-        if (stats.lastMonthlyDate && stats.lastMonthlyDate !== thisMonthStr) {
-          monthly = 0;
-        }
+      // Reset daily if date changed
+      if (stats.lastDailyDate && stats.lastDailyDate !== todayDateStr) {
+        daily = 0;
+      }
+      // Reset monthly if month changed
+      if (stats.lastMonthlyDate && stats.lastMonthlyDate !== thisMonthStr) {
+        monthly = 0;
+      }
 
+      if (isNewSession) {
         daily += 1;
         monthly += 1;
         total += 1;
+      } else if (total === 0) {
+        daily = 1;
+        monthly = 1;
+        total = 1;
+      }
 
-        return {
-          dailyCount: daily,
-          monthlyCount: monthly,
-          totalCount: total,
-          lastDailyDate: todayDateStr,
-          lastMonthlyDate: thisMonthStr,
-          dailyResetAt: stats.dailyResetAt || now,
-          monthlyResetAt: stats.monthlyResetAt || now
-        };
-      });
-    }
+      return {
+        dailyCount: daily,
+        monthlyCount: monthly,
+        totalCount: total,
+        lastDailyDate: todayDateStr,
+        lastMonthlyDate: thisMonthStr,
+        dailyResetAt: stats.dailyResetAt || now,
+        monthlyResetAt: stats.monthlyResetAt || now
+      };
+    });
+
+    // 3. Background asynchronous Geo IP resolution (non-blocking for instant loading)
+    getVisitorGeoInfo().then((geo) => {
+      if (geo && geo.ip && geo.ip !== 'مجهول') {
+        update(visitorRef, sanitizeForFirebase({
+          ip: geo.ip,
+          country: geo.country,
+          countryCode: geo.countryCode,
+          city: geo.city,
+          flagEmoji: geo.flagEmoji
+        })).catch(() => {});
+      }
+    }).catch(() => {});
 
     // 4. Update logged-in user profile with device type & last login timestamp
     if (currentUser?.uid) {
@@ -2080,7 +2319,34 @@ export function subscribeToVisitors(callback: (visitors: VisitorRecord[]) => voi
   const unsubscribe = onValue(visitorsRef, (snapshot) => {
     if (snapshot.exists()) {
       const data = snapshot.val();
-      const list = Object.keys(data).map(key => ({ ...data[key], id: key } as VisitorRecord));
+      const list = Object.keys(data).map(key => {
+        const item = data[key];
+        const rawWatched = item.watchedVideos;
+        const watchedVideos: any[] = rawWatched
+          ? (Array.isArray(rawWatched) ? rawWatched : Object.values(rawWatched))
+          : [];
+        const rawSessions = item.sessions;
+        const sessions: any[] = rawSessions
+          ? (Array.isArray(rawSessions) ? rawSessions : Object.values(rawSessions))
+          : [];
+        return {
+          ...item,
+          id: key,
+          watchedVideos,
+          sessions,
+          deviceType: item.deviceType || 'Desktop',
+          os: item.os || 'غير محدد',
+          browser: item.browser || 'غير محدد',
+          ip: item.ip || 'مجهول',
+          country: item.country || 'غير محدد',
+          countryCode: item.countryCode || '',
+          city: item.city || '',
+          flagEmoji: item.flagEmoji || '🌐',
+          visitsCount: item.visitsCount || 1,
+          screenResolution: item.screenResolution || 'غير معروف',
+          language: item.language || 'ar'
+        } as VisitorRecord;
+      });
       list.sort((a, b) => (b.lastVisitAt || 0) - (a.lastVisitAt || 0));
       callback(list);
     } else {
@@ -2090,7 +2356,13 @@ export function subscribeToVisitors(callback: (visitors: VisitorRecord[]) => voi
     console.error("Visitors listen error:", error);
     callback([]);
   });
-  return () => off(visitorsRef, 'value', unsubscribe);
+  return () => {
+    try {
+      unsubscribe();
+    } catch {
+      off(visitorsRef, 'value', unsubscribe);
+    }
+  };
 }
 
 export async function deleteVisitor(visitorId: string): Promise<void> {
@@ -2117,7 +2389,13 @@ export function subscribeToVisitorStats(callback: (stats: VisitorStats) => void)
     console.error("Visitor stats listen error:", error);
     callback({ dailyCount: 0, monthlyCount: 0, totalCount: 0 });
   });
-  return () => off(statsRef, 'value', unsubscribe);
+  return () => {
+    try {
+      unsubscribe();
+    } catch {
+      off(statsRef, 'value', unsubscribe);
+    }
+  };
 }
 
 export async function resetDailyVisits(): Promise<void> {
@@ -2165,6 +2443,7 @@ export async function recordVisitorWatchedVideo(
 ): Promise<void> {
   const visitorId = getOrCreateVisitorId();
   const visitorRef = ref(db, `visitors/${visitorId}`);
+  const now = Date.now();
 
   try {
     let snap = await get(visitorRef);
@@ -2173,44 +2452,36 @@ export async function recordVisitorWatchedVideo(
       snap = await get(visitorRef);
     }
 
-    if (snap.exists()) {
-      const visitor = snap.val() as VisitorRecord;
-      const watched = visitor.watchedVideos || [];
-      const existingIdx = watched.findIndex(w => w.id === videoId);
-      if (existingIdx >= 0) {
-        watched[existingIdx].watchedAt = Date.now();
-        watched[existingIdx].watchDurationSeconds = (watched[existingIdx].watchDurationSeconds || 0) + durationSeconds;
-      } else {
-        watched.unshift({
-          id: videoId,
-          title,
-          type,
-          thumbnail: thumbnail || '',
-          watchedAt: Date.now(),
-          watchDurationSeconds: durationSeconds
-        });
-      }
-      if (watched.length > 50) watched.pop();
+    const watchedItem = {
+      id: videoId,
+      title: title || 'بدون عنوان',
+      type,
+      thumbnail: thumbnail || '',
+      watchedAt: now,
+      watchDurationSeconds: durationSeconds || 1
+    };
 
-      const sessions = visitor.sessions || [];
-      sessions.push({
-        id: 'watch_' + Date.now(),
-        action: 'watch',
-        timestamp: Date.now(),
-        details: `شاهد ${type === 'short' ? 'شورت' : 'فيديو'}: ${title} (${durationSeconds} ثانية)`
-      });
-      if (sessions.length > 50) sessions.shift();
+    // Store in watchedVideos dictionary
+    const watchedRef = ref(db, `visitors/${visitorId}/watchedVideos/${videoId}`);
+    await set(watchedRef, sanitizeForFirebase(watchedItem));
 
-      await update(visitorRef, sanitizeForFirebase({
-        userUid: currentUser?.uid || visitor.userUid || '',
-        userName: currentUser?.username || visitor.userName || '',
-        email: currentUser?.email || visitor.email || '',
-        avatarUrl: currentUser?.avatarUrl || visitor.avatarUrl || '',
-        watchedVideos: watched,
-        sessions,
-        lastVisitAt: Date.now()
-      }));
-    }
+    // Store in sessions
+    const sessionRef = ref(db, `visitors/${visitorId}/sessions/watch_${now}`);
+    await set(sessionRef, sanitizeForFirebase({
+      id: 'watch_' + now,
+      action: 'watch',
+      timestamp: now,
+      details: `شاهد ${type === 'short' ? 'شورت' : 'فيديو'}: ${title} (${durationSeconds || 1} ثانية)`
+    }));
+
+    // Update lastVisitAt and user profile links
+    await update(visitorRef, sanitizeForFirebase({
+      userUid: currentUser?.uid || '',
+      userName: currentUser?.username || '',
+      email: currentUser?.email || '',
+      avatarUrl: currentUser?.avatarUrl || '',
+      lastVisitAt: now
+    }));
   } catch (e) {
     console.warn("recordVisitorWatchedVideo error", e);
   }

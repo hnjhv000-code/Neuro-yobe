@@ -33,9 +33,13 @@ import {
   ShieldAlert,
   SkipBack,
   SkipForward,
-  ListMusic
+  ListMusic,
+  HardDrive,
+  ShieldCheck
 } from 'lucide-react';
 import { parseVideoUrl } from '../services/embedHelper';
+import { getDriveEmbedUrl } from '../services/googleDrive';
+import { useReactionBurst, ReactionBurstOverlay } from './ReactionBurst';
 import {
   incrementVideoViews,
   recordVideoWatchTime,
@@ -102,11 +106,17 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [newCommentText, setNewCommentText] = useState('');
   const [replyToComment, setReplyToComment] = useState<CommentItem | null>(null);
+  const [replyTargetUser, setReplyTargetUser] = useState<string>('');
+  const [replyTargetUserUid, setReplyTargetUserUid] = useState<string>('');
   const [replyText, setReplyText] = useState('');
+  const [visibleRepliesCountMap, setVisibleRepliesCountMap] = useState<Record<string, number>>({});
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editCommentText, setEditCommentText] = useState('');
   const [isDescExpanded, setIsDescExpanded] = useState(false);
   const [localBlobUrl, setLocalBlobUrl] = useState<string | null>(null);
+
+  // Floating reaction burst hook for like/dislike
+  const { particles: likeBurstParticles, triggerBurst: triggerLikeBurst } = useReactionBurst();
 
   // Playlist drawer state
   const [isPlaylistDrawerOpen, setIsPlaylistDrawerOpen] = useState(true);
@@ -262,7 +272,17 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     return () => unsub();
   }, [video.id]);
 
-  const parsed = video.source === 'external' && video.externalUrl ? parseVideoUrl(video.externalUrl) : null;
+  // Google Drive video detection & secure embed URL resolution
+  const isGoogleDrive = video.source === 'google_drive' || !!video.driveFileId || (video.externalUrl ? (video.externalUrl.includes('drive.google.com') || video.externalUrl.includes('docs.google.com')) : false);
+  const driveEmbedUrl = video.driveFileId
+    ? getDriveEmbedUrl(video.driveFileId)
+    : (video.externalUrl && (video.externalUrl.includes('drive.google.com') || video.externalUrl.includes('docs.google.com'))
+        ? parseVideoUrl(video.externalUrl).embedUrl
+        : null);
+
+  const parsed = isGoogleDrive && driveEmbedUrl
+    ? { isEmbed: true, embedUrl: driveEmbedUrl, provider: 'googledrive' as const }
+    : (video.source === 'external' && video.externalUrl ? parseVideoUrl(video.externalUrl) : null);
 
   // Jump / Seek video to exact timestamp
   const handleSeekTo = (seconds: number, timeStr?: string) => {
@@ -340,6 +360,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   };
 
   const handleLikeClick = async (type: 'like' | 'dislike') => {
+    triggerLikeBurst(type);
     if (!currentUser) {
       onOpenAuth();
       return;
@@ -396,8 +417,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
       onOpenAuth();
       return;
     }
-    if (!video.allowDownload) {
-      showToast(t('downloadNotAllowed'), 'error');
+    if (isGoogleDrive || !video.allowDownload) {
+      showToast(isGoogleDrive ? 'تم منع التنزيل أوتوماتيكياً لحماية حقوق الناشر على جوجل درايف' : t('downloadNotAllowed'), 'error');
       return;
     }
 
@@ -510,6 +531,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     if (!replyText.trim()) return;
 
     try {
+      const targetUserName = replyTargetUser || parentComment.userName;
       await addComment({
         targetId: video.id,
         targetType: 'video',
@@ -521,11 +543,11 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         dislikes: 0,
         createdAt: Date.now(),
         parentCommentId: parentComment.id,
-        replyToUserName: parentComment.userName
+        replyToUserName: targetUserName
       });
       await logUserActivity(currentUser, 'comment', `رد على تعليق في: ${video.title}`);
 
-      // Send notification to author of parent comment
+      // Send notification to author of parent comment if different
       if (currentUser.uid !== parentComment.userUid) {
         await sendNotification({
           recipientUid: parentComment.userUid,
@@ -539,9 +561,31 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         });
       }
 
+      // If replying directly to another user's reply, notify them as well
+      if (replyTargetUserUid && replyTargetUserUid !== currentUser.uid && replyTargetUserUid !== parentComment.userUid) {
+        await sendNotification({
+          recipientUid: replyTargetUserUid,
+          senderUid: currentUser.uid,
+          senderName: currentUser.username,
+          senderAvatar: currentUser.avatarUrl,
+          type: 'reply',
+          targetId: video.id,
+          targetType: 'video',
+          message: `قام ${currentUser.username} بالرد عليك في تعليقات فيديو "${video.title}"`
+        });
+      }
+
+      // Ensure that this reply is immediately revealed in the visible replies
+      setVisibleRepliesCountMap(prev => ({
+        ...prev,
+        [parentComment.id]: (prev[parentComment.id] ?? 1) + 2
+      }));
+
       setReplyToComment(null);
+      setReplyTargetUser('');
+      setReplyTargetUserUid('');
       setReplyText('');
-      showToast('تم نشر الرد وإشعار صاحب التعليق بنجاح', 'success');
+      showToast('تم نشر الرد بنجاح', 'success');
     } catch {
       showToast('فشل نشر الرد', 'error');
     }
@@ -667,16 +711,45 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
           {/* Main Video & Details Column */}
           <div className="lg:col-span-2 flex flex-col gap-4">
             {/* Player Viewport */}
-            <div className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black border border-cyan-900/30 shadow-2xl shadow-cyan-950/50 flex flex-col justify-end group">
+            <div
+              onContextMenu={(e) => {
+                if (isGoogleDrive) {
+                  e.preventDefault();
+                  showToast('حماية المحتوى: تم حظر الوصول للرابط أو التنزيل', 'info');
+                }
+              }}
+              className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black border border-cyan-900/30 shadow-2xl shadow-cyan-950/50 flex flex-col justify-end group select-none"
+            >
               {parsed && parsed.isEmbed && parsed.embedUrl ? (
-                <iframe
-                  ref={iframeRef}
-                  src={parsed.embedUrl}
-                  title={video.title}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                  className="w-full h-full border-0"
-                />
+                <div className="relative w-full h-full">
+                  <iframe
+                    ref={iframeRef}
+                    src={parsed.embedUrl}
+                    title={video.title}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    className="w-full h-full border-0"
+                  />
+                  {/* Anti-Popout Protective Overlay for Google Drive:
+                      Prevents clicking the Google Drive "Open in new window" button to conceal direct links */}
+                  {isGoogleDrive && (
+                    <>
+                      <div
+                        className="absolute top-0 end-0 h-14 w-16 z-20 cursor-default select-none pointer-events-auto bg-transparent"
+                        title="مشغل محمي - تم حظر فتح أو مشاركة رابط جوجل درايف المباشر"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          showToast('تم حظر فتح أو مشاركة رابط جوجل درايف المباشر لحماية حقوق الناشر', 'info');
+                        }}
+                      />
+                      <div className="absolute top-2.5 end-2.5 z-10 pointer-events-none flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#050a14]/85 backdrop-blur-md border border-cyan-500/40 text-[10px] text-cyan-300 font-bold shadow-lg">
+                        <HardDrive className="w-3 h-3 text-cyan-400" />
+                        <span>Google Drive محمي</span>
+                      </div>
+                    </>
+                  )}
+                </div>
               ) : (
                 <video
                   ref={videoRef}
@@ -907,10 +980,11 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
               {/* Action Buttons Bar */}
               <div className="flex flex-wrap items-center gap-2">
                 {/* Like / Dislike Group */}
-                <div className="flex items-center rounded-full bg-[#0b1528] border border-cyan-900/50 overflow-hidden shadow-inner">
+                <div className="relative flex items-center rounded-full bg-[#0b1528] border border-cyan-900/50 shadow-inner">
+                  <ReactionBurstOverlay particles={likeBurstParticles} />
                   <button
                     onClick={() => handleLikeClick('like')}
-                    className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold transition-colors ${
+                    className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold transition-colors rounded-s-full ${
                       userLikedStatus === 'like'
                         ? 'text-cyan-300 bg-cyan-950/80'
                         : 'text-slate-300 hover:bg-cyan-950/40'
@@ -924,7 +998,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
 
                   <button
                     onClick={() => handleLikeClick('dislike')}
-                    className={`p-2 text-xs font-bold transition-colors ${
+                    className={`p-2 text-xs font-bold transition-colors rounded-e-full ${
                       userLikedStatus === 'dislike'
                         ? 'text-rose-400 bg-rose-950/60'
                         : 'text-slate-400 hover:bg-cyan-950/40'
@@ -944,8 +1018,16 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                   <span className="hidden sm:inline">{t('save')}</span>
                 </button>
 
-                {/* Download Button */}
-                {video.allowDownload && (
+                {/* Download Button or Google Drive Protection Badge */}
+                {isGoogleDrive ? (
+                  <div
+                    className="p-2.5 rounded-full bg-[#081324] border border-cyan-800/50 text-cyan-300 text-xs font-semibold flex items-center gap-1.5 cursor-help shadow-sm"
+                    title="تم منع التنزيل ومشاركة الرابط أوتوماتيكياً لحماية حقوق الناشر"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <span className="hidden sm:inline text-[11px]">محمي من التنزيل</span>
+                  </div>
+                ) : video.allowDownload ? (
                   <button
                     onClick={handleDownload}
                     className="p-2.5 rounded-full bg-[#0b1528] border border-cyan-900/50 text-slate-300 hover:text-cyan-300 hover:bg-cyan-950/50 text-xs font-semibold flex items-center gap-1.5 transition-colors"
@@ -954,7 +1036,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                     <DownloadCloud className="w-4 h-4 text-cyan-400" />
                     <span className="hidden sm:inline">{t('download')}</span>
                   </button>
-                )}
+                ) : null}
 
                 {/* Share Button */}
                 <button
@@ -1287,17 +1369,19 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                         </div>
                       )}
 
-                      {/* Reply button */}
+                      {/* Reply button on main comment */}
                       <div className="flex items-center gap-4 ps-10 text-[11px] text-slate-400 font-medium">
                         <button
                           onClick={() => {
                             if (!currentUser) onOpenAuth();
                             else {
-                              setReplyToComment(replyToComment?.id === comment.id ? null : comment);
+                              setReplyToComment(replyToComment?.id === comment.id && replyTargetUser === comment.userName ? null : comment);
+                              setReplyTargetUser(comment.userName);
+                              setReplyTargetUserUid(comment.userUid);
                               setReplyText(`@${comment.userName} `);
                             }
                           }}
-                          className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-bold"
+                          className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-bold transition-colors"
                         >
                           <CornerDownLeft className="w-3 h-3" />
                           <span>{t('reply')} ({replies.length})</span>
@@ -1307,9 +1391,21 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                       {/* Inline Reply input */}
                       {replyToComment?.id === comment.id && (
                         <div className="mt-2 ms-10 p-3 rounded-xl bg-[#0b1528] border border-cyan-900/80 space-y-2 animate-in fade-in duration-150">
-                          <span className="text-[11px] text-cyan-300 font-medium block">
-                            {t('reply')} @{comment.userName}:
-                          </span>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] text-cyan-300 font-bold block">
+                              {t('reply')} @{replyTargetUser || comment.userName}:
+                            </span>
+                            <button
+                              onClick={() => {
+                                setReplyToComment(null);
+                                setReplyTargetUser('');
+                                setReplyTargetUserUid('');
+                              }}
+                              className="text-slate-500 hover:text-slate-300 text-xs"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                           <div className="flex gap-2">
                             <input
                               type="text"
@@ -1317,60 +1413,127 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                               onChange={(e) => setReplyText(e.target.value)}
                               placeholder={t('writeAComment')}
                               className="flex-1 bg-[#070e1c] border border-cyan-900 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-cyan-400"
+                              autoFocus
                             />
                             <button
                               onClick={() => handleAddReply(comment)}
                               disabled={!replyText.trim()}
-                              className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 disabled:opacity-40 text-white rounded-xl text-xs font-bold shrink-0"
+                              className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 disabled:opacity-40 text-white rounded-xl text-xs font-bold shrink-0 shadow-md hover:shadow-cyan-500/20"
                             >
                               {t('send')}
-                            </button>
-                            <button
-                              onClick={() => setReplyToComment(null)}
-                              className="px-2.5 py-2 bg-slate-800 text-slate-400 rounded-xl text-xs"
-                            >
-                              <X className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>
                       )}
 
-                      {/* Nested Replies list */}
-                      {replies.length > 0 && (
-                        <div className="ms-10 mt-1 space-y-2 border-s-2 border-cyan-900/60 ps-3">
-                          {replies.map((rep) => (
-                            <div key={rep.id} className="text-xs p-2.5 rounded-xl bg-[#070e1c]/60 border border-cyan-950/60">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <img
-                                    src={rep.userAvatar}
-                                    alt=""
-                                    className="w-5 h-5 rounded-full object-cover"
-                                  />
-                                  <span className="font-bold text-slate-200">{rep.userName}</span>
-                                  {rep.userUid === video.publisherUid && (
-                                    <span className="text-[9px] px-1 py-0.2 rounded bg-cyan-950 text-cyan-300">{t('channelOwner')}</span>
-                                  )}
-                                  <span className="text-[10px] text-slate-500">
-                                    {new Date(rep.createdAt).toLocaleDateString()}
-                                  </span>
+                      {/* Nested Replies list with Show More (2 per click) & Show Less */}
+                      {replies.length > 0 && (() => {
+                        const visibleCount = visibleRepliesCountMap[comment.id] ?? 1;
+                        const visibleReplies = replies.slice(0, visibleCount);
+                        const hasMore = visibleCount < replies.length;
+                        const isExpanded = visibleCount > 1;
+
+                        return (
+                          <div className="ms-10 mt-2 space-y-2 border-s-2 border-cyan-900/60 ps-3">
+                            {visibleReplies.map((rep) => (
+                              <div key={rep.id} className="text-xs p-2.5 rounded-xl bg-[#070e1c]/70 border border-cyan-950/70 hover:border-cyan-900/60 transition-all">
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+                                    <img
+                                      src={rep.userAvatar}
+                                      alt=""
+                                      className="w-5 h-5 rounded-full object-cover shrink-0"
+                                    />
+                                    <span className="font-bold text-slate-200 truncate">{rep.userName}</span>
+                                    {rep.userUid === video.publisherUid && (
+                                      <span className="text-[9px] px-1 py-0.2 rounded bg-cyan-950 text-cyan-300 font-bold shrink-0">{t('channelOwner')}</span>
+                                    )}
+                                    {rep.replyToUserName && rep.replyToUserName !== comment.userName && (
+                                      <span className="text-[10px] text-cyan-400/90 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-900/50 font-medium shrink-0">
+                                        رد على @{rep.replyToUserName}
+                                      </span>
+                                    )}
+                                    <span className="text-[10px] text-slate-500 shrink-0">
+                                      {new Date(rep.createdAt).toLocaleDateString()}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {/* Reply to this specific reply - anyone can reply */}
+                                    <button
+                                      onClick={() => {
+                                        if (!currentUser) onOpenAuth();
+                                        else {
+                                          setReplyToComment(comment);
+                                          setReplyTargetUser(rep.userName);
+                                          setReplyTargetUserUid(rep.userUid);
+                                          setReplyText(`@${rep.userName} `);
+                                        }
+                                      }}
+                                      className="text-[11px] text-cyan-400 hover:text-cyan-300 font-bold flex items-center gap-1 px-2 py-0.5 rounded-md hover:bg-cyan-950/70 transition-colors"
+                                      title={`رد على ${rep.userName}`}
+                                    >
+                                      <CornerDownLeft className="w-3 h-3" />
+                                      <span>رد</span>
+                                    </button>
+
+                                    {currentUser?.uid === rep.userUid && (
+                                      <button
+                                        onClick={() => handleDeleteComment(rep.id)}
+                                        className="text-slate-500 hover:text-rose-400 p-1 rounded hover:bg-rose-950/40 transition-colors"
+                                        title="حذف الرد"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
-                                {currentUser?.uid === rep.userUid && (
+                                <div className="text-slate-300 ps-6 mt-1.5 leading-relaxed">
+                                  {renderTextWithClickableTimestamps(rep.text, handleSeekTo)}
+                                </div>
+                              </div>
+                            ))}
+
+                            {/* Two buttons: Show more replies (+2) and Show less */}
+                            {replies.length > 1 && (
+                              <div className="flex flex-wrap items-center gap-3 pt-1.5">
+                                {hasMore && (
                                   <button
-                                    onClick={() => handleDeleteComment(rep.id)}
-                                    className="text-slate-500 hover:text-rose-400 p-0.5"
+                                    onClick={() =>
+                                      setVisibleRepliesCountMap((prev) => ({
+                                        ...prev,
+                                        [comment.id]: (prev[comment.id] ?? 1) + 2
+                                      }))
+                                    }
+                                    className="text-[11px] font-bold text-cyan-400 hover:text-cyan-300 flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-950/40 hover:bg-cyan-950/80 border border-cyan-900/40 transition-all shadow-sm"
                                   >
-                                    <Trash2 className="w-3 h-3" />
+                                    <ChevronDown className="w-3.5 h-3.5 text-cyan-400" />
+                                    <span>عرض المزيد من الردود (+{Math.min(2, replies.length - visibleCount)})</span>
+                                    <span className="text-[10px] text-slate-400 font-mono">
+                                      ({replies.length - visibleCount} متبقي)
+                                    </span>
+                                  </button>
+                                )}
+
+                                {isExpanded && (
+                                  <button
+                                    onClick={() =>
+                                      setVisibleRepliesCountMap((prev) => ({
+                                        ...prev,
+                                        [comment.id]: 1
+                                      }))
+                                    }
+                                    className="text-[11px] font-bold text-slate-300 hover:text-white flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-900/60 hover:bg-slate-800 border border-slate-700/60 transition-all shadow-sm"
+                                  >
+                                    <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                                    <span>عرض أقل</span>
                                   </button>
                                 )}
                               </div>
-                              <div className="text-slate-300 ps-7 mt-1">
-                                {renderTextWithClickableTimestamps(rep.text, handleSeekTo)}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}

@@ -11,9 +11,12 @@ import {
   Heart,
   X,
   Send,
-  Trash2
+  Trash2,
+  HardDrive,
+  ShieldCheck
 } from 'lucide-react';
 import { parseVideoUrl } from '../services/embedHelper';
+import { getDriveEmbedUrl } from '../services/googleDrive';
 import {
   incrementVideoViews,
   toggleVideoLike,
@@ -26,6 +29,7 @@ import {
   recordVisitorWatchedVideo
 } from '../services/firebase';
 import { getVideoBlobUrl } from '../services/mediaStorage';
+import { useReactionBurst, ReactionBurstOverlay } from './ReactionBurst';
 import { getTranslation } from '../services/translations';
 import { getShareUrl, copyToClipboard } from '../services/shareHelper';
 import { useToast } from './Toast';
@@ -56,6 +60,9 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
   const [comments, setComments] = useState<CommentItem[]>([]);
   const [commentText, setCommentText] = useState('');
   const [localBlobUrls, setLocalBlobUrls] = useState<Record<string, string>>({});
+
+  // Floating reaction burst for likes and dislikes
+  const { particles: shortsParticles, triggerBurst: triggerShortsBurst } = useReactionBurst();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
@@ -144,6 +151,7 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
       // Double tap registered!
       setHeartCoords({ x, y });
       setShowHeartAnim(true);
+      triggerShortsBurst('like');
       setTimeout(() => setShowHeartAnim(false), 900);
 
       if (currentUser && currentShort) {
@@ -156,6 +164,7 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
   };
 
   const handleLike = async (type: 'like' | 'dislike') => {
+    triggerShortsBurst(type);
     if (!currentUser) {
       onOpenAuth();
       return;
@@ -224,7 +233,18 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
 
   const isSubscribed = currentShort && subscriptions.some((s) => s.channelUid === currentShort.publisherUid);
   const userLikedStatus = currentUser && currentShort?.likedUsers ? currentShort.likedUsers[currentUser.uid] : null;
-  const parsed = currentShort?.source === 'external' && currentShort.externalUrl ? parseVideoUrl(currentShort.externalUrl) : null;
+
+  // Google Drive video detection & secure embed URL resolution
+  const isGoogleDrive = currentShort && (currentShort.source === 'google_drive' || !!currentShort.driveFileId || (currentShort.externalUrl ? (currentShort.externalUrl.includes('drive.google.com') || currentShort.externalUrl.includes('docs.google.com')) : false));
+  const driveEmbedUrl = currentShort?.driveFileId
+    ? getDriveEmbedUrl(currentShort.driveFileId)
+    : (currentShort?.externalUrl && (currentShort.externalUrl.includes('drive.google.com') || currentShort.externalUrl.includes('docs.google.com'))
+        ? parseVideoUrl(currentShort.externalUrl).embedUrl
+        : null);
+
+  const parsed = isGoogleDrive && driveEmbedUrl
+    ? { isEmbed: true, embedUrl: driveEmbedUrl, provider: 'googledrive' as const }
+    : (currentShort?.source === 'external' && currentShort.externalUrl ? parseVideoUrl(currentShort.externalUrl) : null);
 
   return (
     <div className="relative w-full h-[calc(100vh-4rem)] flex items-center justify-center overflow-hidden bg-black py-2">
@@ -250,17 +270,43 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
       <div
         ref={containerRef}
         onClick={handleDoubleTap}
+        onContextMenu={(e) => {
+          if (isGoogleDrive) {
+            e.preventDefault();
+            showToast('حماية المحتوى: تم حظر الوصول للرابط أو التنزيل', 'info');
+          }
+        }}
         className="relative h-full aspect-[9/16] max-h-[820px] rounded-3xl overflow-hidden bg-[#070e1c] border border-cyan-900/40 shadow-2xl shadow-cyan-950/80 flex items-center justify-center select-none"
       >
         {/* Video / Iframe */}
         {parsed && parsed.isEmbed && parsed.embedUrl ? (
-          <iframe
-            src={parsed.embedUrl}
-            title={currentShort.title}
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-            className="w-full h-full object-cover border-0"
-          />
+          <div className="relative w-full h-full">
+            <iframe
+              src={parsed.embedUrl}
+              title={currentShort.title}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              className="w-full h-full object-cover border-0"
+            />
+            {/* Anti-Popout Protective Overlay for Google Drive: Prevents clicking "Open in new window" button */}
+            {isGoogleDrive && (
+              <>
+                <div
+                  className="absolute top-0 end-0 h-14 w-16 z-20 cursor-default select-none pointer-events-auto bg-transparent"
+                  title="مشغل محمي - تم حظر فتح أو مشاركة رابط جوجل درايف المباشر"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    showToast('تم حظر فتح أو مشاركة رابط جوجل درايف المباشر لحماية حقوق الناشر', 'info');
+                  }}
+                />
+                <div className="absolute top-4 end-4 z-10 pointer-events-none flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#050a14]/85 backdrop-blur-md border border-cyan-500/40 text-[10px] text-cyan-300 font-bold shadow-lg">
+                  <HardDrive className="w-3 h-3 text-cyan-400" />
+                  <span>Google Drive محمي</span>
+                </div>
+              </>
+            )}
+          </div>
         ) : (
           <video
             src={localBlobUrls[currentShort.id] || currentShort.videoDataUrl || (parsed ? parsed.directUrl : '') || currentShort.thumbnailDataUrl}
@@ -295,7 +341,8 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
         </button>
 
         {/* Right Interaction Rail */}
-        <div className="absolute end-3 bottom-20 z-30 flex flex-col items-center gap-4">
+        <div className="absolute end-3 bottom-20 z-30 flex flex-col items-center gap-4 relative">
+          <ReactionBurstOverlay particles={shortsParticles} />
           {/* Like */}
           <button
             onClick={(e) => {

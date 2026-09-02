@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { MoreVertical, Clock, DownloadCloud, Share2, Play, Compass, Check, ListPlus } from 'lucide-react';
+import { MoreVertical, Clock, DownloadCloud, Share2, Play, Compass, Check, ListPlus, HardDrive, ShieldCheck } from 'lucide-react';
 import { parseVideoUrl } from '../services/embedHelper';
 import { getTranslation } from '../services/translations';
 import { getShareUrl, copyToClipboard } from '../services/shareHelper';
@@ -35,6 +35,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   const { showToast } = useToast();
   const t = (key: string) => getTranslation(language, key);
 
+  const isGoogleDrive = video.source === 'google_drive' || !!video.driveFileId;
   const parsed = video.source === 'external' && video.externalUrl ? parseVideoUrl(video.externalUrl) : null;
 
   const handleMouseEnter = () => {
@@ -73,8 +74,8 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       onOpenAuth();
       return;
     }
-    if (!video.allowDownload) {
-      showToast(t('downloadNotAllowed'), 'error');
+    if (isGoogleDrive || !video.allowDownload) {
+      showToast(isGoogleDrive ? 'تم منع التنزيل أوتوماتيكياً لحماية حقوق الناشر على جوجل درايف' : t('downloadNotAllowed'), 'error');
       return;
     }
     if (onDownload) onDownload(video);
@@ -97,6 +98,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           }`}
           loading="lazy"
         />
+
+        {/* Google Drive Protection Badge */}
+        {isGoogleDrive && (
+          <div className="absolute top-2 start-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#050a14]/85 backdrop-blur-md border border-cyan-500/40 text-[9px] font-bold text-cyan-300 shadow-md">
+            <HardDrive className="w-3 h-3 text-cyan-400" />
+            <span>Drive محمي</span>
+          </div>
+        )}
 
         {/* Video Preview on Hover (soundless preview for direct videos) */}
         {isHovered && video.videoDataUrl && (
@@ -215,7 +224,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
                 </button>
               )}
 
-              {video.allowDownload && (
+              {video.allowDownload && !isGoogleDrive && (
                 <button
                   onClick={handleDownloadClick}
                   className="w-full text-start px-3.5 py-2.5 text-xs text-slate-300 hover:bg-cyan-950/40 hover:text-cyan-200 transition-colors flex items-center gap-2.5"

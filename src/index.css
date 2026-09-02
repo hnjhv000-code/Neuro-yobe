@@ -202,4 +202,28 @@ video::cue {
   border-radius: 4px;
 }
 
+/* Floating Reaction Emojis Animation */
+@keyframes floatReactionEmoji {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(0.6) rotate(0deg);
+  }
+  25% {
+    transform: translate(var(--dx, 0px), -24px) scale(1.35) rotate(var(--rot, 10deg));
+  }
+  70% {
+    opacity: 0.85;
+    transform: translate(var(--dx, 0px), -65px) scale(1.1) rotate(var(--rot, 10deg));
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx, 0px), -100px) scale(0.7) rotate(var(--rot, 10deg));
+  }
+}
+
+.anim-float-reaction {
+  animation: floatReactionEmoji 1.15s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+}
+
+
 
