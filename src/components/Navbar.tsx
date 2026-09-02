@@ -21,6 +21,8 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { CosmicLogo } from './CosmicLogo';
+import { MobileNotificationsModal } from './MobileNotificationsModal';
+import { NotificationDetailModal } from './NotificationDetailModal';
 import { getTranslation } from '../services/translations';
 import { markAllNotificationsAsRead, markNotificationAsRead } from '../services/firebase';
 import type { Language, UserProfile, NotificationItem, DeveloperSettings, VideoItem } from '../types';
@@ -75,6 +77,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onNavigate
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showMobileNotifications, setShowMobileNotifications] = useState(false);
+  const [selectedNotificationForDetail, setSelectedNotificationForDetail] = useState<NotificationItem | null>(null);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
@@ -346,14 +350,21 @@ export const Navbar: React.FC<NavbarProps> = ({
               <PlusSquare className="w-4 h-4" />
             </button>
 
-            {/* Notifications Dropdown */}
+            {/* Notifications Dropdown & Mobile Trigger */}
             <div ref={notifRef} className="relative shrink-0">
               <button
+                id="notifications-bell-btn"
                 onClick={() => {
                   if (!currentUser) {
                     onOpenAuth();
                   } else {
-                    setShowNotifications(!showNotifications);
+                    // Mobile responsiveness: If on mobile screens (< 640px), open dedicated mobile drawer
+                    if (typeof window !== 'undefined' && window.innerWidth < 640) {
+                      setShowMobileNotifications(true);
+                      setShowNotifications(false);
+                    } else {
+                      setShowNotifications(!showNotifications);
+                    }
                   }
                 }}
                 className="relative p-1.5 sm:p-2 text-slate-300 hover:text-cyan-300 hover:bg-cyan-950/40 rounded-xl transition-colors"
@@ -367,6 +378,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
               </button>
 
+              {/* Desktop & Large Screen Dropdown (hidden on small mobile screens) */}
               {showNotifications && (
                 <div className="absolute top-full mt-2 end-0 w-80 sm:w-96 max-w-[calc(100vw-1.5rem)] bg-[#091224] border border-cyan-900/60 rounded-2xl shadow-2xl shadow-black/90 overflow-hidden z-50 backdrop-blur-2xl animate-in fade-in zoom-in-95 duration-150">
                   <div className="flex items-center justify-between p-3 border-b border-cyan-950/60 bg-[#070e1c]/60">
@@ -403,10 +415,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                           onClick={async () => {
                             await markNotificationAsRead(notif.id);
                             setShowNotifications(false);
-                            if (notif.videoId) {
-                              const found = allVideos.find((v) => v.id === notif.videoId);
-                              if (found) onSelectVideo(found);
-                            }
+                            // Open dedicated full view for this notification
+                            setSelectedNotificationForDetail(notif);
                           }}
                           className={`p-3 text-xs flex items-start gap-2.5 transition-colors cursor-pointer ${
                             !notif.isRead ? 'bg-cyan-950/20 text-slate-200 font-semibold' : 'bg-transparent text-slate-400'
@@ -426,9 +436,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                           <div className="flex-1 min-w-0">
                             <p className="font-bold text-slate-200 truncate">{notif.title}</p>
                             <p className="text-[11px] text-slate-400 line-clamp-2 mt-0.5">{notif.body}</p>
-                            <span className="text-[9px] text-cyan-400/60 block mt-1">
-                              {new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
+                            <div className="flex items-center justify-between mt-1">
+                              <span className="text-[9px] text-cyan-400/60 block">
+                                {new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                              <span className="text-[9px] text-cyan-300/80 underline font-medium">
+                                {t('tapToViewFull', 'عرض التفاصيل')}
+                              </span>
+                            </div>
                           </div>
                           {!notif.isRead && (
                             <span className="w-2 h-2 rounded-full bg-cyan-400 shrink-0 mt-1.5 shadow-[0_0_6px_#22d3ee]" />
@@ -575,6 +590,28 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <button
                         onClick={() => {
                           setShowUserMenu(false);
+                          if (typeof window !== 'undefined' && window.innerWidth < 640) {
+                            setShowMobileNotifications(true);
+                          } else {
+                            setShowNotifications(true);
+                          }
+                        }}
+                        className="w-full text-start px-3.5 py-2 text-xs text-slate-200 hover:bg-cyan-950/50 hover:text-cyan-200 transition-colors flex items-center justify-between cursor-pointer font-medium"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Bell className="w-4 h-4 text-cyan-400" />
+                          <span>{t('notifications')}</span>
+                        </div>
+                        {unreadCount > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-bold">
+                            {unreadCount}
+                          </span>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false);
                           onThemeToggle();
                         }}
                         className="w-full text-start px-3.5 py-2 text-xs text-slate-200 hover:bg-cyan-950/50 hover:text-cyan-200 transition-colors flex items-center justify-between cursor-pointer font-medium"
@@ -648,6 +685,28 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
       )}
+
+      {/* Dedicated Mobile Notification Drawer / Bottom Sheet */}
+      <MobileNotificationsModal
+        isOpen={showMobileNotifications}
+        onClose={() => setShowMobileNotifications(false)}
+        notifications={notifications}
+        language={language}
+        onSelectNotification={(notif) => {
+          setSelectedNotificationForDetail(notif);
+        }}
+        onMarkAllRead={handleMarkAllRead}
+        allVideos={allVideos}
+      />
+
+      {/* Dedicated Full Notification Detail View Modal */}
+      <NotificationDetailModal
+        notification={selectedNotificationForDetail}
+        onClose={() => setSelectedNotificationForDetail(null)}
+        language={language}
+        onSelectVideo={onSelectVideo}
+        allVideos={allVideos}
+      />
     </header>
   );
 };

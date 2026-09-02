@@ -384,7 +384,29 @@ export const translations: Record<Language, Record<string, string>> = {
     privacyBadgeZeroTracking: 'صفر تتبع متطفل',
     privacyBadgeUserControl: 'تحكم كامل بالمحتوى',
     privacyLastUpdated: 'آخر تحديث للسياسة: سبتمبر 2026',
-    contactPrivacyOfficer: 'تواصل مع مسؤول الخصوصية والأمان'
+    contactPrivacyOfficer: 'تواصل مع مسؤول الخصوصية والأمان',
+
+    // Notifications & Mobile Box
+    notificationDetails: 'تفاصيل الإشعار',
+    mobileNotificationsTitle: 'صندوق الإشعارات',
+    notificationTypeNewVideo: 'فيديو جديد',
+    notificationTypeComment: 'تعليق جديد',
+    notificationTypeReply: 'رد على تعليق',
+    notificationTypeSupport: 'رد من الدعم الفني',
+    notificationTypeAdmin: 'تنبيه إداري',
+    notificationTypeSystem: 'إشعار نظامي',
+    notificationTypeLike: 'تفاعل وإعجاب',
+    watchVideoNow: 'مشاهدة الفيديو الآن',
+    linkedVideoPreview: 'المحتوى المرتبط بهذا الإشعار:',
+    deleteNotification: 'حذف الإشعار',
+    filterAll: 'الكل',
+    filterUnread: 'غير المقروءة',
+    allCaughtUp: 'أنت مطلع على كل الإشعارات',
+    unreadNotifCount: 'إشعار غير مقروء',
+    tapToViewFull: 'اضغط لعرض التفاصيل',
+    notificationsNoticeText: 'ستظهر هنا التنبيهات الخاصة بالفيديوهات الجديدة، والردود على تعليقاتك، وتحديثات قناتك.',
+    noUnreadNotifications: 'لا توجد إشعارات غير مقروءة حالياً',
+    sender: 'المرسل:'
   },
   en: {
     siteName: 'NeuroYobe',
@@ -769,7 +791,29 @@ export const translations: Record<Language, Record<string, string>> = {
     privacyBadgeZeroTracking: 'Zero Behavioral Tracking',
     privacyBadgeUserControl: 'Complete Data Autonomy',
     privacyLastUpdated: 'Last Updated: September 2026',
-    contactPrivacyOfficer: 'Contact Privacy & Security Officer'
+    contactPrivacyOfficer: 'Contact Privacy & Security Officer',
+
+    // Notifications & Mobile Box
+    notificationDetails: 'Notification Details',
+    mobileNotificationsTitle: 'Notifications Inbox',
+    notificationTypeNewVideo: 'New Video',
+    notificationTypeComment: 'New Comment',
+    notificationTypeReply: 'Reply to Comment',
+    notificationTypeSupport: 'Support Reply',
+    notificationTypeAdmin: 'Admin Notice',
+    notificationTypeSystem: 'System Notification',
+    notificationTypeLike: 'New Interaction',
+    watchVideoNow: 'Watch Video Now',
+    linkedVideoPreview: 'Content linked to this notification:',
+    deleteNotification: 'Delete Notification',
+    filterAll: 'All',
+    filterUnread: 'Unread',
+    allCaughtUp: 'You\'re all caught up!',
+    unreadNotifCount: 'unread notifications',
+    tapToViewFull: 'Tap to view full details',
+    notificationsNoticeText: 'Notifications about new uploads, comment replies, and channel updates will appear here.',
+    noUnreadNotifications: 'No unread notifications right now',
+    sender: 'Sender:'
   },
   fr: {
     siteName: 'NeuroYobe',
@@ -1030,7 +1074,29 @@ export const translations: Record<Language, Record<string, string>> = {
     privacyBadgeZeroTracking: 'Zéro Traçage Publicitaire',
     privacyBadgeUserControl: 'Contrôle Total de Vos Données',
     privacyLastUpdated: 'Dernière mise à jour : Septembre 2026',
-    contactPrivacyOfficer: 'Contacter le Délégué à la Protection des Données'
+    contactPrivacyOfficer: 'Contacter le Délégué à la Protection des Données',
+
+    // Notifications & Mobile Box
+    notificationDetails: 'Détails de la notification',
+    mobileNotificationsTitle: 'Boîte de notifications',
+    notificationTypeNewVideo: 'Nouvelle vidéo',
+    notificationTypeComment: 'Nouveau commentaire',
+    notificationTypeReply: 'Réponse au commentaire',
+    notificationTypeSupport: 'Réponse du support',
+    notificationTypeAdmin: 'Avis administratif',
+    notificationTypeSystem: 'Notification système',
+    notificationTypeLike: 'Nouvelle interaction',
+    watchVideoNow: 'Regarder la vidéo maintenant',
+    linkedVideoPreview: 'Contenu associé à cette notification :',
+    deleteNotification: 'Supprimer la notification',
+    filterAll: 'Tous',
+    filterUnread: 'Non lus',
+    allCaughtUp: 'Vous êtes à jour !',
+    unreadNotifCount: 'notifications non lues',
+    tapToViewFull: 'Appuyez pour voir les détails',
+    notificationsNoticeText: 'Les notifications concernant les nouvelles vidéos, réponses et mises à jour apparaîtront ici.',
+    noUnreadNotifications: 'Aucune notification non lue actuellement',
+    sender: 'Expéditeur :'
   },
   ja: {
     siteName: 'NeuroYobe',
@@ -1291,7 +1357,29 @@ export const translations: Record<Language, Record<string, string>> = {
     privacyBadgeZeroTracking: '追跡広告・トラッキング排除',
     privacyBadgeUserControl: 'データ完全コントロール',
     privacyLastUpdated: '最終改定日: 2026年9月',
-    contactPrivacyOfficer: 'プライバシー保護責任者に問い合わせる'
+    contactPrivacyOfficer: 'プライバシー保護責任者に問い合わせる',
+
+    // Notifications & Mobile Box
+    notificationDetails: '通知の詳細',
+    mobileNotificationsTitle: '通知ボックス',
+    notificationTypeNewVideo: '新しい動画',
+    notificationTypeComment: '新しいコメント',
+    notificationTypeReply: 'コメントへの返信',
+    notificationTypeSupport: 'サポートからの返信',
+    notificationTypeAdmin: '管理者からのお知らせ',
+    notificationTypeSystem: 'システム通知',
+    notificationTypeLike: '高評価・リアクション',
+    watchVideoNow: '今すぐ動画を再生',
+    linkedVideoPreview: 'この通知に関連するコンテンツ:',
+    deleteNotification: '通知を削除',
+    filterAll: 'すべて',
+    filterUnread: '未読',
+    allCaughtUp: 'すべての通知を確認しました',
+    unreadNotifCount: '件の未読通知',
+    tapToViewFull: 'タップして詳細を表示',
+    notificationsNoticeText: '新着動画、コメントへの返信、チャンネル更新などの通知がここに表示されます。',
+    noUnreadNotifications: '現在、未読の通知はありません',
+    sender: '送信者:'
   },
   zh: {
     siteName: 'NeuroYobe',
@@ -1552,7 +1640,29 @@ export const translations: Record<Language, Record<string, string>> = {
     privacyBadgeZeroTracking: '零侵扰广告跟踪',
     privacyBadgeUserControl: '数据完全自主掌控',
     privacyLastUpdated: '最近更新：2026年9月',
-    contactPrivacyOfficer: '联系隐私与安全专员'
+    contactPrivacyOfficer: '联系隐私与安全专员',
+
+    // Notifications & Mobile Box
+    notificationDetails: '通知详情',
+    mobileNotificationsTitle: '通知中心',
+    notificationTypeNewVideo: '新视频发布',
+    notificationTypeComment: '新评论',
+    notificationTypeReply: '回复了评论',
+    notificationTypeSupport: '客服回复',
+    notificationTypeAdmin: '管理通知',
+    notificationTypeSystem: '系统通知',
+    notificationTypeLike: '点赞互动',
+    watchVideoNow: '立即观看视频',
+    linkedVideoPreview: '与此通知关联的内容：',
+    deleteNotification: '删除通知',
+    filterAll: '全部',
+    filterUnread: '未读',
+    allCaughtUp: '已查看全部通知',
+    unreadNotifCount: '条未读通知',
+    tapToViewFull: '点击查看完整详情',
+    notificationsNoticeText: '新视频、评论回复和频道更新的通知将显示在此处。',
+    noUnreadNotifications: '目前没有未读通知',
+    sender: '发送者：'
   }
 };
 

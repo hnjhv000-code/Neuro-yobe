@@ -1616,6 +1616,10 @@ export async function markNotificationAsRead(notifId: string): Promise<void> {
   await update(ref(db, `notifications/${notifId}`), { isRead: true });
 }
 
+export async function deleteNotification(notifId: string): Promise<void> {
+  await remove(ref(db, `notifications/${notifId}`));
+}
+
 export async function markAllNotificationsAsRead(userUid: string, notifIds: string[]): Promise<void> {
   for (const id of notifIds) {
     await update(ref(db, `notifications/${id}`), { isRead: true });
