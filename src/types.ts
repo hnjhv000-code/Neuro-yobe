@@ -278,6 +278,12 @@ export interface VisitorRecord {
   os: string;
   browser: string;
   ip?: string;
+  country?: string;
+  countryCode?: string;
+  city?: string;
+  flagEmoji?: string;
+  screenResolution?: string;
+  language?: string;
   firstVisitAt: number;
   lastVisitAt: number;
   visitsCount: number;

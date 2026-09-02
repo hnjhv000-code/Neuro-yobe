@@ -13,7 +13,8 @@ import {
   orderByChild,
   equalTo,
   serverTimestamp,
-  DatabaseReference
+  DatabaseReference,
+  runTransaction
 } from 'firebase/database';
 import {
   getAuth,
@@ -1757,9 +1758,88 @@ export const clearWatchHistory = clearAllUserHistory;
    VISITOR INTELLIGENCE & TRACKING ("خانة الزوار")
    ========================================================================= */
 
-function getDeviceDetails(): { deviceType: 'Mobile' | 'Desktop' | 'Tablet' | 'Other'; deviceName: string; os: string; browser: string } {
+// Cache IP & Geo info in memory and sessionStorage to avoid repeating external calls
+let cachedGeoInfo: { ip: string; country: string; countryCode: string; city: string; flagEmoji: string } | null = null;
+
+export async function getVisitorGeoInfo(): Promise<{ ip: string; country: string; countryCode: string; city: string; flagEmoji: string }> {
+  if (cachedGeoInfo) return cachedGeoInfo;
+
+  try {
+    const saved = sessionStorage.getItem('neuro_visitor_geo_info');
+    if (saved) {
+      cachedGeoInfo = JSON.parse(saved);
+      if (cachedGeoInfo) return cachedGeoInfo;
+    }
+  } catch {}
+
+  // Attempt to fetch from ipwho.is (free, https, gives flag, country, city)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch('https://ipwho.is/', { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success !== false) {
+        cachedGeoInfo = {
+          ip: data.ip || 'غير معروف',
+          country: data.country || 'غير معروف',
+          countryCode: data.country_code || '',
+          city: data.city || '',
+          flagEmoji: data.flag?.emoji || '🌐'
+        };
+        try {
+          sessionStorage.setItem('neuro_visitor_geo_info', JSON.stringify(cachedGeoInfo));
+        } catch {}
+        return cachedGeoInfo;
+      }
+    }
+  } catch {}
+
+  // Fallback to api.ipify.org
+  try {
+    const controller2 = new AbortController();
+    const timeoutId2 = setTimeout(() => controller2.abort(), 2500);
+    const res2 = await fetch('https://api.ipify.org?format=json', { signal: controller2.signal });
+    clearTimeout(timeoutId2);
+    if (res2.ok) {
+      const data2 = await res2.json();
+      if (data2 && data2.ip) {
+        cachedGeoInfo = {
+          ip: data2.ip,
+          country: 'غير محدد',
+          countryCode: '',
+          city: '',
+          flagEmoji: '🌐'
+        };
+        try {
+          sessionStorage.setItem('neuro_visitor_geo_info', JSON.stringify(cachedGeoInfo));
+        } catch {}
+        return cachedGeoInfo;
+      }
+    }
+  } catch {}
+
+  cachedGeoInfo = {
+    ip: 'مجهول',
+    country: 'غير محدد',
+    countryCode: '',
+    city: '',
+    flagEmoji: '🌐'
+  };
+  return cachedGeoInfo;
+}
+
+function getDeviceDetails(): { deviceType: 'Mobile' | 'Desktop' | 'Tablet' | 'Other'; deviceName: string; os: string; browser: string; screenResolution: string; language: string } {
   if (typeof window === 'undefined') {
-    return { deviceType: 'Desktop', deviceName: 'Unknown Device', os: 'Unknown OS', browser: 'Unknown Browser' };
+    return {
+      deviceType: 'Desktop',
+      deviceName: 'Unknown Device',
+      os: 'Unknown OS',
+      browser: 'Unknown Browser',
+      screenResolution: '0x0',
+      language: 'ar'
+    };
   }
   const ua = navigator.userAgent || '';
   let deviceType: 'Mobile' | 'Desktop' | 'Tablet' | 'Other' = 'Desktop';
@@ -1770,23 +1850,36 @@ function getDeviceDetails(): { deviceType: 'Mobile' | 'Desktop' | 'Tablet' | 'Ot
   }
 
   let os = 'Unknown OS';
-  if (/Windows/i.test(ua)) os = 'Windows';
+  if (/Windows NT 10.0/i.test(ua)) os = 'Windows 10/11';
+  else if (/Windows NT 6.3/i.test(ua)) os = 'Windows 8.1';
+  else if (/Windows NT 6.1/i.test(ua)) os = 'Windows 7';
+  else if (/Windows/i.test(ua)) os = 'Windows';
   else if (/Macintosh|Mac OS X/i.test(ua)) os = 'macOS';
-  else if (/Android/i.test(ua)) os = 'Android';
-  else if (/iPhone|iPad|iPod/i.test(ua)) os = 'iOS';
-  else if (/Linux/i.test(ua)) os = 'Linux';
+  else if (/Android/i.test(ua)) {
+    const androidMatch = ua.match(/Android\s([0-9\.]+)/);
+    os = androidMatch ? `Android ${androidMatch[1]}` : 'Android';
+  } else if (/iPhone/i.test(ua)) {
+    const iosMatch = ua.match(/OS\s([0-9\_]+)/);
+    os = iosMatch ? `iOS (iPhone) ${iosMatch[1].replace(/_/g, '.')}` : 'iOS (iPhone)';
+  } else if (/iPad/i.test(ua)) {
+    os = 'iOS (iPad)';
+  } else if (/Linux/i.test(ua)) {
+    os = 'Linux';
+  }
 
   let browser = 'Unknown Browser';
-  if (/Chrome/i.test(ua) && !/Edg/i.test(ua)) browser = 'Chrome';
-  else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) browser = 'Safari';
-  else if (/Firefox/i.test(ua)) browser = 'Firefox';
-  else if (/Edg/i.test(ua)) browser = 'Edge';
+  if (/Edg/i.test(ua)) browser = 'Microsoft Edge';
+  else if (/Chrome|CriOS/i.test(ua)) browser = 'Google Chrome';
+  else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) browser = 'Apple Safari';
+  else if (/Firefox|FxiOS/i.test(ua)) browser = 'Mozilla Firefox';
   else if (/Opera|OPR/i.test(ua)) browser = 'Opera';
+  else if (/SamsungBrowser/i.test(ua)) browser = 'Samsung Internet';
 
-  const screenInfo = `${window.screen?.width || 0}x${window.screen?.height || 0}`;
-  const deviceName = `${os} (${deviceType} - ${browser} - ${screenInfo})`;
+  const screenResolution = `${window.screen?.width || window.innerWidth || 0}x${window.screen?.height || window.innerHeight || 0}`;
+  const deviceName = `${os} • ${browser} (${deviceType})`;
+  const language = navigator.language || 'ar';
 
-  return { deviceType, deviceName, os, browser };
+  return { deviceType, deviceName, os, browser, screenResolution, language };
 }
 
 export function getOrCreateVisitorId(): string {
@@ -1805,27 +1898,49 @@ export function getOrCreateVisitorId(): string {
 export async function trackVisitorSession(currentUser?: UserProfile | null): Promise<string> {
   const visitorId = getOrCreateVisitorId();
   const visitorRef = ref(db, `visitors/${visitorId}`);
-  const { deviceType, deviceName, os, browser } = getDeviceDetails();
+  const { deviceType, deviceName, os, browser, screenResolution, language } = getDeviceDetails();
   const now = Date.now();
 
   const todayDateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   const thisMonthStr = todayDateStr.substring(0, 7); // YYYY-MM
 
+  // Check if this browser tab/session already initiated a visit
+  let isNewSession = false;
   try {
+    if (!sessionStorage.getItem('neuro_active_session_token')) {
+      isNewSession = true;
+      sessionStorage.setItem('neuro_active_session_token', 'sess_' + now + '_' + Math.random().toString(36).substring(2, 6));
+    }
+  } catch {
+    isNewSession = true;
+  }
+
+  try {
+    // 1. Fetch IP and Geolocation
+    const geo = await getVisitorGeoInfo();
+
+    // 2. Fetch existing visitor record
     const snap = await get(visitorRef);
-    let existing = snap.exists() ? (snap.val() as VisitorRecord) : null;
+    const existing = snap.exists() ? (snap.val() as VisitorRecord) : null;
 
     if (!existing) {
-      existing = {
+      const initialRecord: VisitorRecord = {
         id: visitorId,
-        userUid: currentUser?.uid,
-        userName: currentUser?.username,
-        email: currentUser?.email,
-        avatarUrl: currentUser?.avatarUrl,
+        userUid: currentUser?.uid || '',
+        userName: currentUser?.username || '',
+        email: currentUser?.email || '',
+        avatarUrl: currentUser?.avatarUrl || '',
         deviceType,
         deviceName,
         os,
         browser,
+        ip: geo.ip,
+        country: geo.country,
+        countryCode: geo.countryCode,
+        city: geo.city,
+        flagEmoji: geo.flagEmoji,
+        screenResolution,
+        language,
         firstVisitAt: now,
         lastVisitAt: now,
         visitsCount: 1,
@@ -1833,71 +1948,94 @@ export async function trackVisitorSession(currentUser?: UserProfile | null): Pro
         watchedVideos: [],
         sessions: [
           {
-            id: 'sess_' + Date.now(),
+            id: 'sess_' + now,
             action: currentUser ? 'login' : 'enter',
             timestamp: now,
-            details: `دخول الموقع عبر ${deviceName}`
+            details: `دخول الموقع عبر ${deviceName} - IP: ${geo.ip} (${geo.country || 'موقع غير محدد'})`
           }
         ]
       };
-      await set(visitorRef, sanitizeForFirebase(existing));
+      await set(visitorRef, sanitizeForFirebase(initialRecord));
     } else {
       const updatedSessions = existing.sessions || [];
-      updatedSessions.push({
-        id: 'sess_' + Date.now(),
-        action: currentUser ? 'login' : 'enter',
-        timestamp: now,
-        details: `زيارة جديدة للموقع (${deviceName})`
-      });
-      // Keep last 40 sessions
-      if (updatedSessions.length > 40) updatedSessions.shift();
+      if (isNewSession) {
+        updatedSessions.push({
+          id: 'sess_' + now,
+          action: currentUser ? 'login' : 'enter',
+          timestamp: now,
+          details: `جلسة زيارة جديدة (${deviceName}) - IP: ${geo.ip}`
+        });
+        if (updatedSessions.length > 50) updatedSessions.shift();
+      }
+
+      const visitsCount = isNewSession ? (existing.visitsCount || 0) + 1 : (existing.visitsCount || 1);
 
       await update(visitorRef, sanitizeForFirebase({
-        userUid: currentUser?.uid || existing.userUid,
-        userName: currentUser?.username || existing.userName,
-        email: currentUser?.email || existing.email,
-        avatarUrl: currentUser?.avatarUrl || existing.avatarUrl,
+        userUid: currentUser?.uid || existing.userUid || '',
+        userName: currentUser?.username || existing.userName || '',
+        email: currentUser?.email || existing.email || '',
+        avatarUrl: currentUser?.avatarUrl || existing.avatarUrl || '',
         lastVisitAt: now,
-        visitsCount: (existing.visitsCount || 0) + 1,
+        visitsCount,
         deviceName,
         os,
         browser,
         deviceType,
+        screenResolution: screenResolution || existing.screenResolution || '',
+        language: language || existing.language || 'ar',
+        ip: geo.ip && geo.ip !== 'مجهول' ? geo.ip : (existing.ip || 'مجهول'),
+        country: geo.country && geo.country !== 'غير محدد' ? geo.country : (existing.country || 'غير محدد'),
+        countryCode: geo.countryCode || existing.countryCode || '',
+        city: geo.city || existing.city || '',
+        flagEmoji: geo.flagEmoji || existing.flagEmoji || '🌐',
         sessions: updatedSessions
       }));
     }
 
-    // Update global visitor counters
-    const statsRef = ref(db, 'visitor_stats/global');
-    const statsSnap = await get(statsRef);
-    let currentStats: VisitorStats = statsSnap.exists()
-      ? statsSnap.val()
-      : { dailyCount: 0, monthlyCount: 0, totalCount: 0 };
+    // 3. Atomically update global visitor stats (only on new sessions)
+    if (isNewSession) {
+      const statsRef = ref(db, 'visitor_stats/global');
+      await runTransaction(statsRef, (currentData) => {
+        const stats = currentData || {
+          dailyCount: 0,
+          monthlyCount: 0,
+          totalCount: 0,
+          lastDailyDate: todayDateStr,
+          lastMonthlyDate: thisMonthStr,
+          dailyResetAt: now,
+          monthlyResetAt: now
+        };
 
-    let dailyCount = (currentStats.dailyCount || 0) + 1;
-    let monthlyCount = (currentStats.monthlyCount || 0) + 1;
-    const totalCount = (currentStats.totalCount || 0) + 1;
+        let daily = Number(stats.dailyCount || 0);
+        let monthly = Number(stats.monthlyCount || 0);
+        let total = Number(stats.totalCount || 0);
 
-    // Daily reset check (if day changed)
-    if (currentStats.lastDailyDate && currentStats.lastDailyDate !== todayDateStr) {
-      dailyCount = 1;
+        // Daily reset if date changed
+        if (stats.lastDailyDate && stats.lastDailyDate !== todayDateStr) {
+          daily = 0;
+        }
+        // Monthly reset if month changed
+        if (stats.lastMonthlyDate && stats.lastMonthlyDate !== thisMonthStr) {
+          monthly = 0;
+        }
+
+        daily += 1;
+        monthly += 1;
+        total += 1;
+
+        return {
+          dailyCount: daily,
+          monthlyCount: monthly,
+          totalCount: total,
+          lastDailyDate: todayDateStr,
+          lastMonthlyDate: thisMonthStr,
+          dailyResetAt: stats.dailyResetAt || now,
+          monthlyResetAt: stats.monthlyResetAt || now
+        };
+      });
     }
-    // Monthly reset check (if month changed)
-    if (currentStats.lastMonthlyDate && currentStats.lastMonthlyDate !== thisMonthStr) {
-      monthlyCount = 1;
-    }
 
-    await set(statsRef, {
-      dailyCount,
-      monthlyCount,
-      totalCount,
-      lastDailyDate: todayDateStr,
-      lastMonthlyDate: thisMonthStr,
-      dailyResetAt: currentStats.dailyResetAt || now,
-      monthlyResetAt: currentStats.monthlyResetAt || now
-    });
-
-    // Also update logged-in user profile with device type & last visit
+    // 4. Update logged-in user profile with device type & last login timestamp
     if (currentUser?.uid) {
       const userProfRef = ref(db, `users/${currentUser.uid}`);
       await update(userProfRef, {
@@ -1912,13 +2050,38 @@ export async function trackVisitorSession(currentUser?: UserProfile | null): Pro
   return visitorId;
 }
 
+export async function logVisitorPageView(pageName: string, currentUser?: UserProfile | null): Promise<void> {
+  try {
+    const visitorId = getOrCreateVisitorId();
+    const visitorRef = ref(db, `visitors/${visitorId}`);
+    const snap = await get(visitorRef);
+    if (snap.exists()) {
+      const visitor = snap.val() as VisitorRecord;
+      const sessions = visitor.sessions || [];
+      sessions.push({
+        id: 'nav_' + Date.now(),
+        action: 'enter',
+        timestamp: Date.now(),
+        details: `تصفح: ${pageName}`
+      });
+      if (sessions.length > 50) sessions.shift();
+      await update(visitorRef, sanitizeForFirebase({
+        lastVisitAt: Date.now(),
+        userUid: currentUser?.uid || visitor.userUid || '',
+        userName: currentUser?.username || visitor.userName || '',
+        sessions
+      }));
+    }
+  } catch {}
+}
+
 export function subscribeToVisitors(callback: (visitors: VisitorRecord[]) => void): () => void {
   const visitorsRef = ref(db, 'visitors');
   const unsubscribe = onValue(visitorsRef, (snapshot) => {
     if (snapshot.exists()) {
       const data = snapshot.val();
       const list = Object.keys(data).map(key => ({ ...data[key], id: key } as VisitorRecord));
-      list.sort((a, b) => b.lastVisitAt - a.lastVisitAt);
+      list.sort((a, b) => (b.lastVisitAt || 0) - (a.lastVisitAt || 0));
       callback(list);
     } else {
       callback([]);
@@ -1958,22 +2121,37 @@ export function subscribeToVisitorStats(callback: (stats: VisitorStats) => void)
 }
 
 export async function resetDailyVisits(): Promise<void> {
-  await update(ref(db, 'visitor_stats/global'), {
-    dailyCount: 0,
-    dailyResetAt: Date.now()
+  const statsRef = ref(db, 'visitor_stats/global');
+  await runTransaction(statsRef, (current) => {
+    const stats = current || { dailyCount: 0, monthlyCount: 0, totalCount: 0 };
+    return {
+      ...stats,
+      dailyCount: 0,
+      dailyResetAt: Date.now()
+    };
   });
 }
 
 export async function resetMonthlyVisits(): Promise<void> {
-  await update(ref(db, 'visitor_stats/global'), {
-    monthlyCount: 0,
-    monthlyResetAt: Date.now()
+  const statsRef = ref(db, 'visitor_stats/global');
+  await runTransaction(statsRef, (current) => {
+    const stats = current || { dailyCount: 0, monthlyCount: 0, totalCount: 0 };
+    return {
+      ...stats,
+      monthlyCount: 0,
+      monthlyResetAt: Date.now()
+    };
   });
 }
 
 export async function resetTotalVisits(): Promise<void> {
-  await update(ref(db, 'visitor_stats/global'), {
-    totalCount: 0
+  const statsRef = ref(db, 'visitor_stats/global');
+  await runTransaction(statsRef, (current) => {
+    const stats = current || { dailyCount: 0, monthlyCount: 0, totalCount: 0 };
+    return {
+      ...stats,
+      totalCount: 0
+    };
   });
 }
 
@@ -1989,14 +2167,19 @@ export async function recordVisitorWatchedVideo(
   const visitorRef = ref(db, `visitors/${visitorId}`);
 
   try {
-    const snap = await get(visitorRef);
+    let snap = await get(visitorRef);
+    if (!snap.exists()) {
+      await trackVisitorSession(currentUser);
+      snap = await get(visitorRef);
+    }
+
     if (snap.exists()) {
       const visitor = snap.val() as VisitorRecord;
       const watched = visitor.watchedVideos || [];
       const existingIdx = watched.findIndex(w => w.id === videoId);
       if (existingIdx >= 0) {
         watched[existingIdx].watchedAt = Date.now();
-        watched[existingIdx].watchDurationSeconds += durationSeconds;
+        watched[existingIdx].watchDurationSeconds = (watched[existingIdx].watchDurationSeconds || 0) + durationSeconds;
       } else {
         watched.unshift({
           id: videoId,
@@ -2014,17 +2197,18 @@ export async function recordVisitorWatchedVideo(
         id: 'watch_' + Date.now(),
         action: 'watch',
         timestamp: Date.now(),
-        details: `شاهد: ${title} (${durationSeconds} ثانية)`
+        details: `شاهد ${type === 'short' ? 'شورت' : 'فيديو'}: ${title} (${durationSeconds} ثانية)`
       });
-      if (sessions.length > 40) sessions.shift();
+      if (sessions.length > 50) sessions.shift();
 
       await update(visitorRef, sanitizeForFirebase({
-        userUid: currentUser?.uid || visitor.userUid,
-        userName: currentUser?.username || visitor.userName,
-        email: currentUser?.email || visitor.email,
-        avatarUrl: currentUser?.avatarUrl || visitor.avatarUrl,
+        userUid: currentUser?.uid || visitor.userUid || '',
+        userName: currentUser?.username || visitor.userName || '',
+        email: currentUser?.email || visitor.email || '',
+        avatarUrl: currentUser?.avatarUrl || visitor.avatarUrl || '',
         watchedVideos: watched,
-        sessions
+        sessions,
+        lastVisitAt: Date.now()
       }));
     }
   } catch (e) {

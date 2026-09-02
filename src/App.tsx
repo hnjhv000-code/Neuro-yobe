@@ -36,7 +36,9 @@ import {
   subscribeToUserPlaylists,
   updateUserProfileFields,
   logUserActivity,
-  clearWatchHistory
+  clearWatchHistory,
+  trackVisitorSession,
+  logVisitorPageView
 } from './services/firebase';
 import { getTranslation } from './services/translations';
 import { getCachedVideos, getCachedPosts, clearAllLocalCachedContent } from './services/sampleData';
@@ -295,6 +297,16 @@ export const AppContent: React.FC = () => {
       unsubDev();
     };
   }, []);
+
+  // Visitor Intelligence & Traffic Tracking (Automated visitor counting and device logging)
+  useEffect(() => {
+    trackVisitorSession(currentUser);
+  }, [currentUser?.uid]);
+
+  // Track page navigation in visitor session logs
+  useEffect(() => {
+    logVisitorPageView(currentRoute, currentUser);
+  }, [currentRoute]);
 
   // User-specific Subscriptions
   useEffect(() => {

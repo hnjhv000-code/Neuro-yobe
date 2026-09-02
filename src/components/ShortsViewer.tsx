@@ -22,7 +22,8 @@ import {
   deleteComment,
   toggleSubscription,
   addToWatchHistory,
-  logUserActivity
+  logUserActivity,
+  recordVisitorWatchedVideo
 } from '../services/firebase';
 import { getVideoBlobUrl } from '../services/mediaStorage';
 import { getTranslation } from '../services/translations';
@@ -91,6 +92,14 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
   useEffect(() => {
     if (currentShort) {
       incrementVideoViews(currentShort.id);
+      recordVisitorWatchedVideo(
+        currentShort.id,
+        currentShort.title,
+        'short',
+        currentShort.thumbnailDataUrl,
+        5,
+        currentUser
+      );
       if (currentUser) {
         addToWatchHistory(currentUser.uid, currentShort);
         logUserActivity(currentUser, 'watch', `شاهد شورت: ${currentShort.title}`);

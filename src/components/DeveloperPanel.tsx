@@ -33,7 +33,14 @@ import {
   Flag,
   History,
   Clock,
-  Play
+  Play,
+  Table,
+  LayoutGrid,
+  Download,
+  Copy,
+  Check,
+  MapPin,
+  Tablet
 } from 'lucide-react';
 import { CosmicLogo } from './CosmicLogo';
 import { compressDeviceImage } from '../services/mediaStorage';
@@ -145,9 +152,12 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
   const [manualUid, setManualUid] = useState('');
   const [manualReason, setManualReason] = useState('مخالفة معايير النشر واستخدام المنصة');
 
-  // Search filter
+  // Search & view filter for visitors
   const [globalSearch, setGlobalSearch] = useState('');
   const [visitorSearch, setVisitorSearch] = useState('');
+  const [visitorViewMode, setVisitorViewMode] = useState<'table' | 'cards'>('table');
+  const [visitorFilter, setVisitorFilter] = useState<'all' | 'mobile' | 'desktop' | 'tablet' | 'registered' | 'guest' | 'banned'>('all');
+  const [copiedIp, setCopiedIp] = useState<string | null>(null);
   const [complaintFilter, setComplaintFilter] = useState<'all' | 'pending' | 'reviewed' | 'action_taken'>('all');
 
   // Video Inspection Modal State
@@ -326,6 +336,53 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
       await clearAllVisitors();
       setSelectedVisitor(null);
       showToast('تم مسح كافة سجلات الزوار بنجاح', 'success');
+    }
+  };
+
+  const handleCopyIp = (ip?: string) => {
+    if (!ip || ip === 'مجهول' || ip === 'جاري التحديد') {
+      showToast('عنوان IP غير متوفر للنسخ حالياً', 'info');
+      return;
+    }
+    navigator.clipboard?.writeText(ip);
+    setCopiedIp(ip);
+    showToast(`تم نسخ عنوان IP (${ip}) بنجاح`, 'success');
+    setTimeout(() => setCopiedIp(null), 2500);
+  };
+
+  const handleExportVisitorsJSON = () => {
+    try {
+      const exportList = visitors.map((v) => ({
+        id: v.id,
+        user: v.userUid ? `${v.userName} (${v.email})` : 'زائر بدون حساب',
+        userUid: v.userUid || null,
+        email: v.email || null,
+        userName: v.userName || null,
+        deviceType: v.deviceType,
+        deviceName: v.deviceName || 'جهاز غير محدد',
+        os: v.os,
+        browser: v.browser,
+        ip: v.ip || 'غير معروف',
+        country: v.country || 'غير محدد',
+        city: v.city || '',
+        screenResolution: v.screenResolution || '',
+        language: v.language || '',
+        visitsCount: v.visitsCount || 1,
+        firstVisitAt: new Date(v.firstVisitAt).toLocaleString(),
+        lastVisitAt: new Date(v.lastVisitAt).toLocaleString(),
+        isBanned: !!v.isBanned,
+        watchedVideosCount: v.watchedVideos ? v.watchedVideos.length : 0
+      }));
+      const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(exportList, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute('href', dataStr);
+      downloadAnchor.setAttribute('download', `neuro_visitors_table_${new Date().toISOString().split('T')[0]}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      showToast('تم تصدير بيانات جدول الزوار بنجاح (JSON) 📥', 'success');
+    } catch {
+      showToast('تعذر تصدير السجلات', 'error');
     }
   };
 
@@ -596,228 +653,604 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
         {/* Content Viewport */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#060b18]">
           {/* TAB: الزوار والتتبع (Visitors Intelligence) */}
-          {activeTab === 'visitors' && (
-            <div className="space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
-                    <Globe className="w-5 h-5 text-cyan-400" />
-                    <span>تتبع الزوار وإحصائيات الزيارات المباشرة</span>
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    تتبع كل زائر يدخل للمنصة (مسجل أو زائر عادي): نوع الجهاز، المتصفح، نظام التشغيل، المقاطع المشاهدة، والزيارات اليومية والشهرية.
-                  </p>
-                </div>
+          {activeTab === 'visitors' && (() => {
+            const filteredVisitors = visitors.filter((v) => {
+              if (visitorSearch.trim()) {
+                const q = visitorSearch.toLowerCase();
+                const match =
+                  (v.os || '').toLowerCase().includes(q) ||
+                  (v.browser || '').toLowerCase().includes(q) ||
+                  (v.deviceType || '').toLowerCase().includes(q) ||
+                  (v.email || '').toLowerCase().includes(q) ||
+                  (v.userName || '').toLowerCase().includes(q) ||
+                  (v.ip || '').toLowerCase().includes(q) ||
+                  (v.country || '').toLowerCase().includes(q) ||
+                  (v.city || '').toLowerCase().includes(q) ||
+                  (v.id || '').toLowerCase().includes(q);
+                if (!match) return false;
+              }
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleClearAllVisitors}
-                    className="px-3.5 py-2 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>مسح سجلات الزوار</span>
-                  </button>
-                </div>
-              </div>
+              if (visitorFilter === 'mobile') return v.deviceType === 'Mobile';
+              if (visitorFilter === 'desktop') return v.deviceType === 'Desktop';
+              if (visitorFilter === 'tablet') return v.deviceType === 'Tablet';
+              if (visitorFilter === 'registered') return !!v.userUid;
+              if (visitorFilter === 'guest') return !v.userUid;
+              if (visitorFilter === 'banned') return !!v.isBanned;
 
-              {/* Reset Counters Row */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Daily Counter */}
-                <div className="p-4 rounded-2xl bg-gradient-to-br from-[#091224] to-[#0f1d38] border border-cyan-900/60 shadow-lg flex items-center justify-between">
+              return true;
+            });
+
+            const mobileCount = visitors.filter((v) => v.deviceType === 'Mobile').length;
+            const desktopCount = visitors.filter((v) => v.deviceType === 'Desktop').length;
+            const registeredCount = visitors.filter((v) => !!v.userUid).length;
+            const guestCount = visitors.filter((v) => !v.userUid).length;
+
+            return (
+              <div className="space-y-6">
+                {/* Header & Main Actions */}
+                <div className="flex flex-wrap items-center justify-between gap-4">
                   <div>
-                    <span className="text-xs text-slate-400 block font-medium">الزيارات اليومية</span>
-                    <p className="text-3xl font-black text-cyan-300 mt-1">
-                      {visitorStats?.dailyCount || 0}
+                    <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
+                      <Globe className="w-5 h-5 text-cyan-400" />
+                      <span>جدول تتبع الزوار وإحصائيات الزيارات الحية</span>
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-1">
+                      نظام رصد تلقائي دقيق يحفظ كافة بيانات الزوار (المسجلين وغير المسجلين) في جدول مباشر: الجهاز، عنوان IP، الدولة، المتصفح، وسجل المشاهدات.
                     </p>
-                    <span className="text-[10px] text-cyan-500/80 block mt-0.5">اليوم ({new Date().toLocaleDateString()})</span>
                   </div>
-                  <button
-                    onClick={handleResetDaily}
-                    className="px-3 py-2 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow"
-                    title="تصفير عدد الزيارات اليومية"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>تصفير اليومي</span>
-                  </button>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={handleExportVisitorsJSON}
+                      className="px-3.5 py-2 bg-cyan-950/90 hover:bg-cyan-900 border border-cyan-700/60 text-cyan-300 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+                      title="تصدير جدول الزوار إلى ملف JSON"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>تصدير الجدول (JSON)</span>
+                    </button>
+
+                    <button
+                      onClick={handleClearAllVisitors}
+                      className="px-3.5 py-2 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>مسح سجلات الزوار</span>
+                    </button>
+                  </div>
                 </div>
 
-                {/* Monthly Counter */}
-                <div className="p-4 rounded-2xl bg-gradient-to-br from-[#091224] to-[#0f1d38] border border-sky-900/60 shadow-lg flex items-center justify-between">
-                  <div>
-                    <span className="text-xs text-slate-400 block font-medium">الزيارات الشهرية</span>
-                    <p className="text-3xl font-black text-sky-300 mt-1">
-                      {visitorStats?.monthlyCount || 0}
-                    </p>
-                    <span className="text-[10px] text-sky-500/80 block mt-0.5">الشهر الحالي</span>
+                {/* Reset Counters Row */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Daily Counter */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-[#091224] to-[#0f1d38] border border-cyan-900/60 shadow-lg flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-slate-400 block font-medium">الزيارات اليومية</span>
+                      <p className="text-3xl font-black text-cyan-300 mt-1">
+                        {visitorStats?.dailyCount || 0}
+                      </p>
+                      <span className="text-[10px] text-cyan-500/80 block mt-0.5">اليوم ({new Date().toLocaleDateString()})</span>
+                    </div>
+                    <button
+                      onClick={handleResetDaily}
+                      className="px-3 py-2 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow"
+                      title="تصفير عدد الزيارات اليومية"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>تصفير اليومي</span>
+                    </button>
                   </div>
-                  <button
-                    onClick={handleResetMonthly}
-                    className="px-3 py-2 rounded-xl bg-sky-950/80 hover:bg-sky-900 border border-sky-500/40 text-sky-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow"
-                    title="تصفير عدد الزيارات الشهرية"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>تصفير الشهري</span>
-                  </button>
+
+                  {/* Monthly Counter */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-[#091224] to-[#0f1d38] border border-sky-900/60 shadow-lg flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-slate-400 block font-medium">الزيارات الشهرية</span>
+                      <p className="text-3xl font-black text-sky-300 mt-1">
+                        {visitorStats?.monthlyCount || 0}
+                      </p>
+                      <span className="text-[10px] text-sky-500/80 block mt-0.5">الشهر الحالي</span>
+                    </div>
+                    <button
+                      onClick={handleResetMonthly}
+                      className="px-3 py-2 rounded-xl bg-sky-950/80 hover:bg-sky-900 border border-sky-500/40 text-sky-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow"
+                      title="تصفير عدد الزيارات الشهرية"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>تصفير الشهري</span>
+                    </button>
+                  </div>
+
+                  {/* Total Counter */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-[#091224] to-[#0f1d38] border border-indigo-900/60 shadow-lg flex items-center justify-between">
+                    <div>
+                      <span className="text-xs text-slate-400 block font-medium">إجمالي الزيارات الكلية</span>
+                      <p className="text-3xl font-black text-indigo-300 mt-1">
+                        {visitorStats?.totalCount || 0}
+                      </p>
+                      <span className="text-[10px] text-indigo-400/80 block mt-0.5">منذ بدء المنصة</span>
+                    </div>
+                    <button
+                      onClick={handleResetTotal}
+                      className="px-3 py-2 rounded-xl bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow"
+                      title="تصفير إجمالي الزيارات الكلية"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>تصفير الإجمالي</span>
+                    </button>
+                  </div>
                 </div>
 
-                {/* Total Counter */}
-                <div className="p-4 rounded-2xl bg-gradient-to-br from-[#091224] to-[#0f1d38] border border-indigo-900/60 shadow-lg flex items-center justify-between">
-                  <div>
-                    <span className="text-xs text-slate-400 block font-medium">إجمالي الزيارات الكلية</span>
-                    <p className="text-3xl font-black text-indigo-300 mt-1">
-                      {visitorStats?.totalCount || 0}
-                    </p>
-                    <span className="text-[10px] text-indigo-400/80 block mt-0.5">منذ بدء المنصة</span>
+                {/* KPI Overview Badges */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3 rounded-2xl bg-[#091224] border border-cyan-950/80 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">إجمالي الزوار بالجدول</span>
+                      <span className="text-base font-black text-cyan-300">{visitors.length}</span>
+                    </div>
+                    <Users className="w-5 h-5 text-cyan-400/40" />
                   </div>
-                  <button
-                    onClick={handleResetTotal}
-                    className="px-3 py-2 rounded-xl bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow"
-                    title="تصفير إجمالي الزيارات الكلية"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>تصفير الإجمالي</span>
-                  </button>
-                </div>
-              </div>
 
-              {/* Visitor Search Filter */}
-              <div className="flex items-center gap-3 bg-[#091224] p-3 rounded-2xl border border-cyan-950">
-                <Search className="w-4 h-4 text-cyan-400 shrink-0" />
-                <input
-                  type="text"
-                  value={visitorSearch}
-                  onChange={(e) => setVisitorSearch(e.target.value)}
-                  placeholder="ابحث عن زائر بحسب نظام التشغيل، المتصفح، البريد أو المعرف..."
-                  className="w-full bg-transparent text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none"
-                />
-              </div>
+                  <div className="p-3 rounded-2xl bg-[#091224] border border-cyan-950/80 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">زوار الهواتف (Mobile)</span>
+                      <span className="text-base font-black text-amber-300">{mobileCount}</span>
+                    </div>
+                    <Smartphone className="w-5 h-5 text-amber-400/40" />
+                  </div>
 
-              {/* Visitors Cards / Table */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-xs font-bold text-slate-400 px-1">
-                  <span>سجلات الزوار المتصلين ({visitors.length})</span>
-                  <span>اضغط على أي زائر للاطلاع على تفاصيل وسجل المشاهدات</span>
+                  <div className="p-3 rounded-2xl bg-[#091224] border border-cyan-950/80 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">زوار الكمبيوتر (Desktop)</span>
+                      <span className="text-base font-black text-sky-300">{desktopCount}</span>
+                    </div>
+                    <Laptop className="w-5 h-5 text-sky-400/40" />
+                  </div>
+
+                  <div className="p-3 rounded-2xl bg-[#091224] border border-cyan-950/80 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">أعضاء مسجلين / زوار</span>
+                      <span className="text-base font-black text-emerald-300">
+                        {registeredCount} / {guestCount}
+                      </span>
+                    </div>
+                    <ShieldCheck className="w-5 h-5 text-emerald-400/40" />
+                  </div>
                 </div>
 
-                {visitors.length === 0 ? (
-                  <div className="p-12 text-center rounded-2xl bg-[#091224] border border-cyan-950 text-slate-500 text-xs">
-                    لا توجد سجلات زوار مسجلة بعد
+                {/* Search and Filters Toolbar */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-[#091224] p-3 rounded-2xl border border-cyan-950">
+                  <div className="flex items-center gap-3 flex-1">
+                    <Search className="w-4 h-4 text-cyan-400 shrink-0" />
+                    <input
+                      type="text"
+                      value={visitorSearch}
+                      onChange={(e) => setVisitorSearch(e.target.value)}
+                      placeholder="ابحث بالاسم، البريد، عنوان IP، الدولة، النظام، المتصفح أو المعرف..."
+                      className="w-full bg-transparent text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none"
+                    />
                   </div>
-                ) : (
-                  visitors
-                    .filter(v => {
-                      if (!visitorSearch.trim()) return true;
-                      const q = visitorSearch.toLowerCase();
-                      return (
-                        (v.os || '').toLowerCase().includes(q) ||
-                        (v.browser || '').toLowerCase().includes(q) ||
-                        (v.deviceType || '').toLowerCase().includes(q) ||
-                        (v.email || '').toLowerCase().includes(q) ||
-                        (v.userName || '').toLowerCase().includes(q)
-                      );
-                    })
-                    .map((visitor) => {
-                      const isMobile = visitor.deviceType === 'Mobile';
-                      const watchedCount = visitor.watchedVideos ? visitor.watchedVideos.length : 0;
-                      return (
-                        <div
-                          key={visitor.id}
-                          className="p-4 rounded-2xl bg-[#091224] hover:bg-[#0c1830] border border-cyan-950/80 hover:border-cyan-500/40 transition-all flex flex-wrap items-center justify-between gap-4"
-                        >
-                          <div className="flex items-center gap-3.5 min-w-[240px]">
-                            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center border shrink-0 ${
-                              isMobile
-                                ? 'bg-amber-950/40 border-amber-500/40 text-amber-300'
-                                : 'bg-cyan-950/40 border-cyan-500/40 text-cyan-300'
-                            }`}>
-                              {isMobile ? <Smartphone className="w-5 h-5" /> : <Laptop className="w-5 h-5" />}
+
+                  {/* View Mode Toggle */}
+                  <div className="flex items-center gap-1 bg-[#060b18] p-1 rounded-xl border border-cyan-950 self-end sm:self-auto">
+                    <button
+                      onClick={() => setVisitorViewMode('table')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
+                        visitorViewMode === 'table'
+                          ? 'bg-cyan-600 text-white shadow'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                      title="عرض كجدول بيانات"
+                    >
+                      <Table className="w-3.5 h-3.5" />
+                      <span>جدول</span>
+                    </button>
+                    <button
+                      onClick={() => setVisitorViewMode('cards')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
+                        visitorViewMode === 'cards'
+                          ? 'bg-cyan-600 text-white shadow'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                      title="عرض كبطاقات"
+                    >
+                      <LayoutGrid className="w-3.5 h-3.5" />
+                      <span>بطاقات</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter Pills */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {(
+                    [
+                      { id: 'all', label: `الكل (${visitors.length})` },
+                      { id: 'mobile', label: `الهواتف (${mobileCount})` },
+                      { id: 'desktop', label: `الكمبيوتر (${desktopCount})` },
+                      { id: 'registered', label: `المسجلين (${registeredCount})` },
+                      { id: 'guest', label: `بدون حساب (${guestCount})` },
+                      { id: 'banned', label: `المحظورين (${visitors.filter((v) => v.isBanned).length})` }
+                    ] as const
+                  ).map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => setVisitorFilter(f.id)}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                        visitorFilter === f.id
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                          : 'bg-[#091224] text-slate-400 border border-cyan-950 hover:text-slate-200'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Table View */}
+                {visitorViewMode === 'table' && (
+                  <div className="rounded-2xl border border-cyan-950 bg-[#091224]/90 overflow-hidden shadow-2xl">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-right text-xs border-collapse">
+                        <thead className="bg-[#0c1830] text-slate-300 font-bold border-b border-cyan-950">
+                          <tr>
+                            <th className="p-3.5 whitespace-nowrap">الجهاز</th>
+                            <th className="p-3.5 whitespace-nowrap">الزائر / الحساب</th>
+                            <th className="p-3.5 whitespace-nowrap">عنوان IP والموقع الجغرافي</th>
+                            <th className="p-3.5 whitespace-nowrap">نظام التشغيل والمتصفح</th>
+                            <th className="p-3.5 whitespace-nowrap">الشاشة / اللغة</th>
+                            <th className="p-3.5 whitespace-nowrap text-center">مرات الدخول</th>
+                            <th className="p-3.5 whitespace-nowrap text-center">مشاهدات</th>
+                            <th className="p-3.5 whitespace-nowrap">آخر ظهور</th>
+                            <th className="p-3.5 whitespace-nowrap text-center">الحالة</th>
+                            <th className="p-3.5 whitespace-nowrap text-center">الإجراءات</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-cyan-950/60">
+                          {filteredVisitors.length === 0 ? (
+                            <tr>
+                              <td colSpan={10} className="p-12 text-center text-slate-500">
+                                {visitors.length === 0
+                                  ? 'لا توجد سجلات زوار مسجلة بعد في قاعدة البيانات. سيتم تسجيل الزوار تلقائياً عند تصفح المنصة.'
+                                  : 'لا توجد نتائج مطابقة لخيارات البحث والتصفية المحددة.'}
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredVisitors.map((visitor) => {
+                              const isMobile = visitor.deviceType === 'Mobile';
+                              const isTablet = visitor.deviceType === 'Tablet';
+                              const watchedCount = visitor.watchedVideos ? visitor.watchedVideos.length : 0;
+
+                              return (
+                                <tr
+                                  key={visitor.id}
+                                  className={`hover:bg-[#0d1c3a]/70 transition-colors ${
+                                    visitor.isBanned ? 'bg-rose-950/20' : ''
+                                  }`}
+                                >
+                                  {/* Device Icon */}
+                                  <td className="p-3.5 whitespace-nowrap">
+                                    <div
+                                      className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
+                                        isMobile
+                                          ? 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+                                          : isTablet
+                                          ? 'bg-purple-950/40 border-purple-500/40 text-purple-300'
+                                          : 'bg-cyan-950/40 border-cyan-500/40 text-cyan-300'
+                                      }`}
+                                      title={visitor.deviceType}
+                                    >
+                                      {isMobile ? (
+                                        <Smartphone className="w-4 h-4" />
+                                      ) : isTablet ? (
+                                        <Tablet className="w-4 h-4" />
+                                      ) : (
+                                        <Laptop className="w-4 h-4" />
+                                      )}
+                                    </div>
+                                  </td>
+
+                                  {/* User Profile */}
+                                  <td className="p-3.5 min-w-[180px]">
+                                    {visitor.userUid ? (
+                                      <div>
+                                        <span className="font-bold text-emerald-300 block truncate max-w-[170px]">
+                                          {visitor.userName || 'مستخدم مسجل'}
+                                        </span>
+                                        <span className="text-[10px] text-slate-400 block truncate max-w-[170px]">
+                                          {visitor.email}
+                                        </span>
+                                        <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded bg-emerald-950/80 border border-emerald-800 text-emerald-400 text-[9px] font-bold">
+                                          عضو مسجل
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <div>
+                                        <span className="font-bold text-slate-300 block">زائر بدون حساب</span>
+                                        <span className="text-[10px] text-slate-500 font-mono block">
+                                          {visitor.id.slice(0, 14)}...
+                                        </span>
+                                        <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700 text-slate-400 text-[9px]">
+                                          ضيف
+                                        </span>
+                                      </div>
+                                    )}
+                                  </td>
+
+                                  {/* IP & Location */}
+                                  <td className="p-3.5 min-w-[160px]">
+                                    <div className="space-y-0.5">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-base">{visitor.flagEmoji || '🌐'}</span>
+                                        <span className="font-bold text-slate-200 text-xs">
+                                          {visitor.country && visitor.country !== 'غير محدد'
+                                            ? `${visitor.country}${visitor.city ? ` - ${visitor.city}` : ''}`
+                                            : 'موقع غير محدد'}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-mono text-[11px] text-cyan-400">
+                                          {visitor.ip || 'غير معروف'}
+                                        </span>
+                                        {visitor.ip && visitor.ip !== 'مجهول' && (
+                                          <button
+                                            onClick={() => handleCopyIp(visitor.ip)}
+                                            className="p-1 text-slate-400 hover:text-cyan-300 rounded hover:bg-cyan-950"
+                                            title="نسخ عنوان IP"
+                                          >
+                                            {copiedIp === visitor.ip ? (
+                                              <Check className="w-3 h-3 text-emerald-400" />
+                                            ) : (
+                                              <Copy className="w-3 h-3" />
+                                            )}
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </td>
+
+                                  {/* OS & Browser */}
+                                  <td className="p-3.5 min-w-[150px]">
+                                    <div className="space-y-0.5">
+                                      <span className="font-bold text-slate-200 block">
+                                        {visitor.os || 'غير معروف'}
+                                      </span>
+                                      <span className="text-[11px] text-cyan-400 block">
+                                        {visitor.browser || 'متصفح'}
+                                      </span>
+                                      <span className="text-[10px] text-slate-500 block truncate max-w-[140px]">
+                                        {visitor.deviceName || 'جهاز'}
+                                      </span>
+                                    </div>
+                                  </td>
+
+                                  {/* Screen & Language */}
+                                  <td className="p-3.5 whitespace-nowrap">
+                                    <div className="space-y-0.5">
+                                      <span className="font-mono text-[11px] text-slate-300 block">
+                                        {visitor.screenResolution || 'غير محدد'}
+                                      </span>
+                                      <span className="text-[10px] text-slate-400 block font-mono">
+                                        {visitor.language || 'ar'}
+                                      </span>
+                                    </div>
+                                  </td>
+
+                                  {/* Visits Count */}
+                                  <td className="p-3.5 whitespace-nowrap text-center">
+                                    <span className="px-2.5 py-1 rounded-full bg-cyan-950 border border-cyan-800 text-cyan-300 font-bold text-xs font-mono">
+                                      {visitor.visitsCount || 1}
+                                    </span>
+                                  </td>
+
+                                  {/* Watched Videos */}
+                                  <td className="p-3.5 whitespace-nowrap text-center">
+                                    <button
+                                      onClick={() => setSelectedVisitor(visitor)}
+                                      className="px-2.5 py-1 rounded-full bg-indigo-950 border border-indigo-800 text-indigo-300 font-bold text-xs flex items-center gap-1 mx-auto hover:bg-indigo-900 transition-colors"
+                                      title="عرض الفيديوهات المشاهدة"
+                                    >
+                                      <Play className="w-3 h-3" />
+                                      <span>{watchedCount}</span>
+                                    </button>
+                                  </td>
+
+                                  {/* Last Visit */}
+                                  <td className="p-3.5 min-w-[130px] whitespace-nowrap">
+                                    <span className="text-[11px] text-slate-300 block">
+                                      {new Date(visitor.lastVisitAt).toLocaleDateString()}
+                                    </span>
+                                    <span className="text-[10px] text-slate-500 block">
+                                      {new Date(visitor.lastVisitAt).toLocaleTimeString()}
+                                    </span>
+                                  </td>
+
+                                  {/* Status */}
+                                  <td className="p-3.5 whitespace-nowrap text-center">
+                                    {visitor.isBanned ? (
+                                      <span className="px-2 py-0.5 rounded-full bg-rose-950 border border-rose-800 text-rose-300 text-[10px] font-bold">
+                                        محظور
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-800 text-emerald-300 text-[10px] font-bold">
+                                        نشط
+                                      </span>
+                                    )}
+                                  </td>
+
+                                  {/* Actions */}
+                                  <td className="p-3.5 whitespace-nowrap text-center">
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      <button
+                                        onClick={() => setSelectedVisitor(visitor)}
+                                        className="p-1.5 bg-cyan-950 hover:bg-cyan-900 border border-cyan-800 text-cyan-300 rounded-lg transition-colors"
+                                        title="تفاصيل وسجل المشاهدات"
+                                      >
+                                        <Eye className="w-3.5 h-3.5" />
+                                      </button>
+
+                                      <button
+                                        onClick={() => handleBanVisitor(visitor.id, visitor.isBanned)}
+                                        className={`p-1.5 rounded-lg transition-colors ${
+                                          visitor.isBanned
+                                            ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800'
+                                            : 'bg-amber-950 hover:bg-amber-900 text-amber-300 border border-amber-800'
+                                        }`}
+                                        title={visitor.isBanned ? 'إلغاء حظر الزائر' : 'حظر الزائر من الموقع'}
+                                      >
+                                        <Ban className="w-3.5 h-3.5" />
+                                      </button>
+
+                                      <button
+                                        onClick={() => handleDeleteVisitor(visitor.id)}
+                                        className="p-1.5 bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 rounded-lg transition-colors"
+                                        title="حذف سجل الزائر"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Cards View */}
+                {visitorViewMode === 'cards' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredVisitors.length === 0 ? (
+                      <div className="col-span-full p-12 text-center rounded-2xl bg-[#091224] border border-cyan-950 text-slate-500 text-xs">
+                        لا توجد سجلات زوار مطابقة
+                      </div>
+                    ) : (
+                      filteredVisitors.map((visitor) => {
+                        const isMobile = visitor.deviceType === 'Mobile';
+                        const watchedCount = visitor.watchedVideos ? visitor.watchedVideos.length : 0;
+                        return (
+                          <div
+                            key={visitor.id}
+                            className={`p-4 rounded-2xl bg-[#091224] hover:bg-[#0c1830] border transition-all flex flex-col justify-between gap-4 ${
+                              visitor.isBanned ? 'border-rose-900/60' : 'border-cyan-950/80 hover:border-cyan-500/40'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className={`w-10 h-10 rounded-2xl flex items-center justify-center border shrink-0 ${
+                                    isMobile
+                                      ? 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+                                      : 'bg-cyan-950/40 border-cyan-500/40 text-cyan-300'
+                                  }`}
+                                >
+                                  {isMobile ? <Smartphone className="w-5 h-5" /> : <Laptop className="w-5 h-5" />}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-bold text-xs text-slate-100">
+                                      {visitor.os || 'غير معروف'} ({visitor.deviceType})
+                                    </span>
+                                    {visitor.isBanned && (
+                                      <span className="px-2 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-300 text-[9px] font-bold">
+                                        محظور
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                                    <span className="text-cyan-400">{visitor.browser || 'متصفح'}</span>
+                                    <span>•</span>
+                                    <span className="truncate max-w-[120px]">{visitor.deviceName || 'جهاز'}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <span className="text-xl">{visitor.flagEmoji || '🌐'}</span>
                             </div>
 
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-bold text-xs text-slate-100">
-                                  {visitor.os || 'غير معروف'} ({visitor.deviceType})
+                            {/* Middle Info */}
+                            <div className="space-y-1.5 text-xs bg-[#060b18] p-2.5 rounded-xl border border-cyan-950">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400 text-[11px]">الحساب:</span>
+                                <span className="font-semibold text-emerald-400 text-[11px]">
+                                  {visitor.userUid ? visitor.userName || visitor.email : 'زائر بدون حساب'}
                                 </span>
-                                {visitor.isBanned && (
-                                  <span className="px-2 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-300 text-[9px] font-bold">
-                                    محظور
-                                  </span>
-                                )}
                               </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400 text-[11px]">عنوان IP:</span>
+                                <div className="flex items-center gap-1 font-mono text-cyan-400 text-[11px]">
+                                  <span>{visitor.ip || 'غير معروف'}</span>
+                                  {visitor.ip && visitor.ip !== 'مجهول' && (
+                                    <button
+                                      onClick={() => handleCopyIp(visitor.ip)}
+                                      className="text-slate-400 hover:text-white"
+                                    >
+                                      {copiedIp === visitor.ip ? (
+                                        <Check className="w-3 h-3 text-emerald-400" />
+                                      ) : (
+                                        <Copy className="w-3 h-3" />
+                                      )}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400 text-[11px]">الموقع:</span>
+                                <span className="text-slate-300 text-[11px]">
+                                  {visitor.country ? `${visitor.country} ${visitor.city || ''}` : 'غير محدد'}
+                                </span>
+                              </div>
+                            </div>
 
-                              <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
-                                <span className="text-cyan-400">{visitor.browser || 'متصفح'}</span>
-                                <span>•</span>
-                                <span>{visitor.deviceName || 'جهاز'}</span>
+                            {/* Counters */}
+                            <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                              <div className="p-2 rounded-xl bg-[#091224] border border-cyan-950">
+                                <span className="text-[10px] text-slate-400 block">مرات الدخول</span>
+                                <span className="font-bold text-cyan-300">{visitor.visitsCount || 1}</span>
                               </div>
+                              <div className="p-2 rounded-xl bg-[#091224] border border-cyan-950">
+                                <span className="text-[10px] text-slate-400 block">مقاطع شاهدها</span>
+                                <span className="font-bold text-indigo-300">{watchedCount}</span>
+                              </div>
+                            </div>
 
-                              <div className="text-[10px] text-slate-400 mt-1">
-                                {visitor.userUid ? (
-                                  <span className="text-emerald-400 font-semibold">
-                                    مسجل: {visitor.userName || visitor.email}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-500">زائر بدون حساب</span>
-                                )}
-                              </div>
+                            {/* Actions */}
+                            <div className="flex items-center gap-2 pt-2 border-t border-cyan-950">
+                              <button
+                                onClick={() => setSelectedVisitor(visitor)}
+                                className="flex-1 py-1.5 bg-cyan-950 hover:bg-cyan-900 border border-cyan-800 text-cyan-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>التفاصيل</span>
+                              </button>
+                              <button
+                                onClick={() => handleBanVisitor(visitor.id, visitor.isBanned)}
+                                className={`p-2 rounded-xl text-xs font-bold transition-colors ${
+                                  visitor.isBanned
+                                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                                    : 'bg-amber-950 text-amber-300 border border-amber-800'
+                                }`}
+                                title={visitor.isBanned ? 'إلغاء حظر الزائر' : 'حظر الزائر'}
+                              >
+                                <Ban className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteVisitor(visitor.id)}
+                                className="p-2 bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 rounded-xl transition-colors"
+                                title="حذف سجل الزائر"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
                             </div>
                           </div>
-
-                          {/* Stats Summary */}
-                          <div className="flex flex-wrap items-center gap-4 text-xs">
-                            <div className="text-center">
-                              <span className="text-[10px] text-slate-400 block">مرات الدخول</span>
-                              <span className="font-bold text-cyan-300">{visitor.visitsCount || 1}</span>
-                            </div>
-
-                            <div className="text-center">
-                              <span className="text-[10px] text-slate-400 block">مقاطع شاهدها</span>
-                              <span className="font-bold text-indigo-300">{watchedCount}</span>
-                            </div>
-
-                            <div className="text-slate-400 text-[11px]">
-                              <span className="block">أول زيارة: {new Date(visitor.firstVisitAt).toLocaleDateString()}</span>
-                              <span className="block text-slate-500">آخر ظهور: {new Date(visitor.lastVisitAt).toLocaleTimeString()}</span>
-                            </div>
-                          </div>
-
-                          {/* Actions */}
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => setSelectedVisitor(visitor)}
-                              className="px-3 py-1.5 bg-cyan-950 hover:bg-cyan-900 border border-cyan-800 text-cyan-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              <span>التفاصيل والسجل</span>
-                            </button>
-
-                            <button
-                              onClick={() => handleBanVisitor(visitor.id, visitor.isBanned)}
-                              className={`p-2 rounded-xl text-xs font-bold transition-colors ${
-                                visitor.isBanned
-                                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                                  : 'bg-amber-950 text-amber-300 border border-amber-800'
-                              }`}
-                              title={visitor.isBanned ? 'إلغاء حظر الزائر' : 'حظر الزائر من الموقع'}
-                            >
-                              <Ban className="w-4 h-4" />
-                            </button>
-
-                            <button
-                              onClick={() => handleDeleteVisitor(visitor.id)}
-                              className="p-2 bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 rounded-xl transition-colors"
-                              title="حذف سجل الزائر"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })
+                        );
+                      })
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* TAB: الشكاوى والإبلاغات (Complaints & Reports) */}
           {activeTab === 'complaints' && (
@@ -1869,6 +2302,55 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
               <div className="p-3 rounded-xl bg-[#091224] border border-cyan-950">
                 <span className="text-[10px] text-slate-400 block">اسم الجهاز والبيئة</span>
                 <strong className="text-xs text-indigo-300">{selectedVisitor.deviceName || 'غير محدد'}</strong>
+              </div>
+            </div>
+
+            {/* IP, Location & Screen Details */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 rounded-xl bg-[#091224] border border-cyan-950">
+                <span className="text-[10px] text-slate-400 block">عنوان IP</span>
+                <div className="flex items-center justify-between gap-1 mt-0.5">
+                  <strong className="text-xs font-mono text-cyan-300 truncate">
+                    {selectedVisitor.ip || 'غير معروف'}
+                  </strong>
+                  {selectedVisitor.ip && selectedVisitor.ip !== 'مجهول' && (
+                    <button
+                      onClick={() => handleCopyIp(selectedVisitor.ip)}
+                      className="p-0.5 text-slate-400 hover:text-white"
+                      title="نسخ IP"
+                    >
+                      {copiedIp === selectedVisitor.ip ? (
+                        <Check className="w-3 h-3 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-[#091224] border border-cyan-950">
+                <span className="text-[10px] text-slate-400 block">الموقع الجغرافي</span>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span>{selectedVisitor.flagEmoji || '🌐'}</span>
+                  <strong className="text-xs text-slate-200 truncate">
+                    {selectedVisitor.country || 'غير محدد'} {selectedVisitor.city ? `(${selectedVisitor.city})` : ''}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-[#091224] border border-cyan-950">
+                <span className="text-[10px] text-slate-400 block">دقة الشاشة</span>
+                <strong className="text-xs font-mono text-sky-300">
+                  {selectedVisitor.screenResolution || 'غير محدد'}
+                </strong>
+              </div>
+
+              <div className="p-3 rounded-xl bg-[#091224] border border-cyan-950">
+                <span className="text-[10px] text-slate-400 block">لغة المتصفح</span>
+                <strong className="text-xs font-mono text-indigo-300">
+                  {selectedVisitor.language || 'ar'}
+                </strong>
               </div>
             </div>
 
