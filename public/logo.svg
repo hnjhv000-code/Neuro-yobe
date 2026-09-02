@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <defs>
+    <radialGradient id="nebulaGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.8"/>
+      <stop offset="60%" stop-color="#0284c7" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#050a14" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="40%" stop-color="#0284c7"/>
+      <stop offset="70%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#0369a1"/>
+    </linearGradient>
+    <linearGradient id="metalChrome" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="25%" stop-color="#cbd5e1"/>
+      <stop offset="50%" stop-color="#64748b"/>
+      <stop offset="75%" stop-color="#e2e8f0"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+    <linearGradient id="neonCyan" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#00f0ff"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background Ambient Glow -->
+  <circle cx="250" cy="250" r="230" fill="url(#nebulaGlow)"/>
+
+  <!-- Outer Film Strip Ring & Ribbons -->
+  <circle cx="250" cy="230" r="185" fill="none" stroke="#0ea5e9" stroke-width="8" stroke-dasharray="16 10" opacity="0.75" filter="url(#glow)"/>
+  <circle cx="250" cy="230" r="170" fill="#070f20" stroke="url(#metalChrome)" stroke-width="12" filter="url(#glow)"/>
+
+  <!-- Inner Cyber Tech Pattern Ring -->
+  <circle cx="250" cy="230" r="145" fill="#040914" stroke="#00f0ff" stroke-width="3" stroke-dasharray="4 6"/>
+
+  <!-- Glowing Crown on the left shoulder -->
+  <g transform="translate(110, 140) scale(0.65)" filter="url(#glow)">
+    <path d="M10 50 L25 10 L50 35 L75 10 L90 50 Z" fill="url(#shieldGrad)" stroke="#38bdf8" stroke-width="4"/>
+    <circle cx="25" cy="10" r="5" fill="#00f0ff"/>
+    <circle cx="50" cy="35" r="4" fill="#00f0ff"/>
+    <circle cx="75" cy="10" r="5" fill="#00f0ff"/>
+    <polygon points="50,20 45,30 55,30" fill="#ffffff"/>
+  </g>
+
+  <!-- Central Glowing Triangle / Play Button Core -->
+  <g filter="url(#glow)">
+    <polygon points="215,165 315,230 215,295" fill="#041226" stroke="#00f0ff" stroke-width="10" stroke-linejoin="round"/>
+    <polygon points="225,180 300,230 225,280" fill="url(#neonCyan)" opacity="0.95"/>
+    <!-- Electric Lightning Flares in Play Button -->
+    <path d="M240 195 L255 225 L245 235 L275 225" stroke="#ffffff" stroke-width="3" fill="none" opacity="0.8"/>
+  </g>
+
+  <!-- 3D Ribbon / Banner for "NeuroYobe" -->
+  <g transform="translate(250, 395)" filter="url(#glow)">
+    <!-- Plate base -->
+    <rect x="-190" y="-38" width="380" height="76" rx="24" fill="#030c1e" stroke="url(#metalChrome)" stroke-width="6"/>
+    <rect x="-182" y="-30" width="364" height="60" rx="18" fill="#051530" stroke="#00f0ff" stroke-width="2"/>
+    
+    <!-- NeuroYobe Typography -->
+    <text x="0" y="14" font-family="'Outfit', 'Cairo', sans-serif" font-size="44" font-weight="900" text-anchor="middle" fill="url(#metalChrome)" letter-spacing="1.5">
+      Neuro<tspan fill="#00f0ff">Yobe</tspan>
+    </text>
+
+    <!-- Mini Neon Play button at badge end -->
+    <polygon points="145,-5 160,5 145,15" fill="#00f0ff" filter="url(#glow)"/>
+  </g>
+</svg>

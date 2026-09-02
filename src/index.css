@@ -1,0 +1,205 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-cairo: 'Cairo', system-ui, sans-serif;
+    --font-display: 'Outfit', 'Cairo', sans-serif;
+    --font-sans: 'Plus Jakarta Sans', 'Cairo', sans-serif;
+  }
+
+  body {
+    font-family: var(--font-cairo);
+  }
+}
+
+/* ----------------------------------------------------
+   Light Theme Comprehensive System Overrides
+---------------------------------------------------- */
+html.light,
+body.light,
+.light-theme {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+  color-scheme: light;
+}
+
+/* Light Mode Background Overrides */
+.light-theme .bg-\[\#050a14\],
+.light-theme.bg-\[\#050a14\] {
+  background-color: #f8fafc !important;
+}
+
+.light-theme .bg-\[\#070e1c\]\/95,
+.light-theme .bg-\[\#070e1c\]\/98,
+.light-theme .bg-\[\#070e1c\]\/90,
+.light-theme .bg-\[\#070e1c\]\/80,
+.light-theme .bg-\[\#070e1c\]\/60,
+.light-theme .bg-\[\#070e1c\] {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+}
+
+.light-theme .bg-\[\#091224\],
+.light-theme .bg-\[\#091224\]\/90,
+.light-theme .bg-\[\#091224\]\/80,
+.light-theme .bg-\[\#091224\]\/60,
+.light-theme .bg-\[\#091224\]\/50,
+.light-theme .bg-\[\#091224\]\/40,
+.light-theme .bg-\[\#091224\]\/30 {
+  background-color: #ffffff !important;
+}
+
+.light-theme .bg-slate-900,
+.light-theme .bg-slate-950,
+.light-theme .bg-slate-900\/80,
+.light-theme .bg-slate-900\/50 {
+  background-color: #f1f5f9 !important;
+}
+
+.light-theme .bg-cyan-950,
+.light-theme .bg-cyan-950\/80,
+.light-theme .bg-cyan-950\/60,
+.light-theme .bg-cyan-950\/40,
+.light-theme .bg-cyan-950\/20 {
+  background-color: #e0f2fe !important;
+  color: #0369a1 !important;
+}
+
+/* Light Mode Text Overrides */
+.light-theme .text-slate-100,
+.light-theme .text-slate-200,
+.light-theme .text-white:not(button .text-white, .bg-gradient-to-r *, .badge *) {
+  color: #0f172a !important;
+}
+
+.light-theme .text-slate-300,
+.light-theme .text-slate-400 {
+  color: #475569 !important;
+}
+
+.light-theme .text-slate-500 {
+  color: #64748b !important;
+}
+
+.light-theme .text-cyan-300,
+.light-theme .text-cyan-400 {
+  color: #0284c7 !important;
+}
+
+/* Light Mode Borders & Dividers */
+.light-theme .border-cyan-900\/30,
+.light-theme .border-cyan-900\/40,
+.light-theme .border-cyan-900\/50,
+.light-theme .border-cyan-900\/60,
+.light-theme .border-cyan-950,
+.light-theme .border-cyan-950\/80,
+.light-theme .border-cyan-950\/60,
+.light-theme .border-cyan-950\/40,
+.light-theme .border-slate-800,
+.light-theme .border-slate-700 {
+  border-color: #e2e8f0 !important;
+}
+
+.light-theme .divide-cyan-950\/60 > * + *,
+.light-theme .divide-cyan-950\/40 > * + *,
+.light-theme .divide-cyan-950 > * + * {
+  border-color: #f1f5f9 !important;
+}
+
+/* Light Mode Inputs, Textareas, & Selects */
+.light-theme input,
+.light-theme textarea,
+.light-theme select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+.light-theme input::placeholder,
+.light-theme textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Light Mode Card Shadows & Hovers */
+.light-theme .shadow-2xl {
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04) !important;
+}
+
+.light-theme .shadow-lg {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
+}
+
+.light-theme .hover\:bg-cyan-950\/40:hover,
+.light-theme .hover\:bg-cyan-950\/30:hover,
+.light-theme .hover\:bg-cyan-950\/20:hover {
+  background-color: #f8fafc !important;
+}
+
+/* Custom Cosmic Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(7, 11, 20, 0.6);
+}
+
+.light-theme ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(14, 165, 233, 0.25);
+  border-radius: 9999px;
+}
+
+.light-theme ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(6, 182, 212, 0.5);
+}
+
+.light-theme ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Cosmic Nebula Background Animation Classes */
+@keyframes nebulaDrift {
+  0% { transform: translate(0px, 0px) scale(1); }
+  50% { transform: translate(25px, -15px) scale(1.08); }
+  100% { transform: translate(0px, 0px) scale(1); }
+}
+
+@keyframes starTwinkle {
+  0%, 100% { opacity: 0.2; transform: scale(0.8); }
+  50% { opacity: 0.8; transform: scale(1.2); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.4; filter: blur(30px); }
+  50% { opacity: 0.7; filter: blur(45px); }
+}
+
+.anim-nebula-drift {
+  animation: nebulaDrift 18s ease-in-out infinite alternate;
+}
+
+.anim-star-twinkle {
+  animation: starTwinkle 3s ease-in-out infinite;
+}
+
+.anim-pulse-glow {
+  animation: pulseGlow 6s ease-in-out infinite;
+}
+
+/* Video Player Styling */
+video::cue {
+  background-color: rgba(0, 0, 0, 0.75);
+  color: #38bdf8;
+  font-size: 1.1rem;
+  border-radius: 4px;
+}
+
+

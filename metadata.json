@@ -1,0 +1,10 @@
+{
+  "name": "Copy of Neuroybe",
+  "description": "منصة يوتيوب عصرية مستوحاة من المجرات مع تشغيل فيديوهات وشورتس وبحث حقيقي ولوحة تحكم مطور متكاملة وقاعدة بيانات Firebase الحقيقية.",
+  "requestFramePermissions": [
+    "notifications"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
