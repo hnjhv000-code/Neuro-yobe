@@ -29,7 +29,9 @@ import {
   User,
   RecaptchaVerifier,
   signInWithPhoneNumber,
-  ConfirmationResult
+  ConfirmationResult,
+  GoogleAuthProvider,
+  signInWithPopup
 } from 'firebase/auth';
 
 import type {
@@ -155,6 +157,15 @@ export function getFriendlyAuthErrorMessage(err: any): string {
   if (code === 'auth/code-expired') {
     return 'انتهت صلاحية كود التحقق. يرجى طلب إرسال رسالة SMS جديدة.';
   }
+  if (code === 'auth/unauthorized-domain') {
+    return 'النطاق (Domain) الحالي غير مدرج في النطاقات المصرح بها (Authorized Domains) في إعدادات Firebase Authentication أو Google Cloud Console.';
+  }
+  if (code === 'auth/operation-not-allowed') {
+    return 'تسجيل الدخول عبر Google غير مفعّل في Firebase Authentication Console.';
+  }
+  if (msg.includes('origin_mismatch') || code === 'auth/origin-mismatch') {
+    return 'خطأ 400 (origin_mismatch): مصدر JavaScript للموقع الحالي غير مسجل في Google Cloud Console للـ OAuth Client ID.';
+  }
   return msg || 'حدث خطأ أثناء المصادقة.';
 }
 
@@ -229,6 +240,41 @@ export async function sendPasswordReset(email: string) {
   try {
     return await sendPasswordResetEmail(auth, email.trim());
   } catch (err: any) {
+    const friendly = getFriendlyAuthErrorMessage(err);
+    const customErr: any = new Error(friendly);
+    customErr.code = err?.code;
+    throw customErr;
+  }
+}
+
+/**
+ * Sign in with Google using Firebase Authentication Popup
+ */
+export async function signInWithGoogle(): Promise<{
+  uid: string;
+  email: string;
+  displayName?: string;
+  photoURL?: string;
+  emailVerified: boolean;
+}> {
+  try {
+    const provider = new GoogleAuthProvider();
+    provider.addScope('email');
+    provider.addScope('profile');
+    provider.setCustomParameters({
+      prompt: 'select_account'
+    });
+
+    const result = await signInWithPopup(auth, provider);
+    return {
+      uid: result.user.uid,
+      email: result.user.email || '',
+      displayName: result.user.displayName || undefined,
+      photoURL: result.user.photoURL || undefined,
+      emailVerified: Boolean(result.user.emailVerified)
+    };
+  } catch (err: any) {
+    console.warn('Google signInWithPopup error:', err?.code, err?.message);
     const friendly = getFriendlyAuthErrorMessage(err);
     const customErr: any = new Error(friendly);
     customErr.code = err?.code;

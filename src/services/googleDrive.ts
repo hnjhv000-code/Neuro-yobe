@@ -11,7 +11,9 @@
 
 import type { VideoUploadProgress } from './firebase';
 
-export const GOOGLE_DRIVE_CLIENT_ID = '799261220718-vit6eqldflqd9s24cftmbe1ucap9485d.apps.googleusercontent.com';
+export const GOOGLE_DRIVE_CLIENT_ID =
+  (typeof import.meta !== 'undefined' && ((import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || (import.meta as any).env?.VITE_GOOGLE_DRIVE_CLIENT_ID)) ||
+  '799261220718-vit6eqldflqd9s24cftmbe1ucap9485d.apps.googleusercontent.com';
 export const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
 // In-memory token cache (never stored in localStorage)
@@ -126,6 +128,10 @@ export async function requestDriveAuthorization(forceConsent: boolean = false): 
         callback: (resp) => {
           if (resp.error) {
             console.error('Google OAuth error:', resp);
+            if (resp.error === 'origin_mismatch' || (resp.error_description && resp.error_description.includes('origin_mismatch'))) {
+              reject(new Error('خطأ 400 origin_mismatch: مصدر الموقع الحالي غير مدرج في أصول JavaScript المعتمدة داخل Google Cloud Console لهذا الـ Client ID.'));
+              return;
+            }
             reject(new Error(resp.error_description || resp.error || 'تم إلغاء التفويض من قبل المستخدم'));
             return;
           }
