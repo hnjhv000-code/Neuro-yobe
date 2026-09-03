@@ -29,7 +29,8 @@ import {
 import {
   uploadVideoToGoogleDrive,
   requestDriveAuthorization,
-  hasValidDriveToken
+  hasValidDriveToken,
+  isDrivePreviouslyAuthorized
 } from '../services/googleDrive';
 import {
   inspectDeviceVideo,
@@ -38,11 +39,12 @@ import {
 } from '../services/videoInspection';
 import { getTranslation } from '../services/translations';
 import { useToast } from './Toast';
-import type { UserProfile, Language, VideoType, VideoSource, VideoVisibility } from '../types';
+import type { UserProfile, Language, VideoType, VideoSource, VideoVisibility, DeveloperSettings } from '../types';
 
 interface UploadModalProps {
   currentUser: UserProfile;
   language: Language;
+  developerSettings?: DeveloperSettings | null;
   onClose: () => void;
   onSuccess: (videoId: string) => void;
 }
@@ -50,6 +52,7 @@ interface UploadModalProps {
 export const UploadModal: React.FC<UploadModalProps> = ({
   currentUser,
   language,
+  developerSettings,
   onClose,
   onSuccess
 }) => {
@@ -61,12 +64,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [externalUrl, setExternalUrl] = useState('');
   const [visibility, setVisibility] = useState<VideoVisibility>('public');
 
-  // Google Drive Authorization State
-  const [isDriveAuthorized, setIsDriveAuthorized] = useState<boolean>(hasValidDriveToken());
+  // Cloud Storage Authorization State (Prompted once on first upload only)
+  const [isDriveAuthorized, setIsDriveAuthorized] = useState<boolean>(
+    hasValidDriveToken() || isDrivePreviouslyAuthorized()
+  );
   const [isAuthorizingDrive, setIsAuthorizingDrive] = useState<boolean>(false);
 
   useEffect(() => {
-    setIsDriveAuthorized(hasValidDriveToken());
+    setIsDriveAuthorized(hasValidDriveToken() || isDrivePreviouslyAuthorized());
   }, []);
 
   const getDefaultScheduledTime = () => {
@@ -109,17 +114,17 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     { id: 'news', label: 'أخبار وتحليلات' }
   ];
 
-  // Publisher Google Drive Authorization Handler
+  // Publisher Cloud Upload Authorization Handler
   const handleAuthorizeDrive = async () => {
     setIsAuthorizingDrive(true);
     try {
-      showToast('جاري فتح نافذة تفويض جوجل درايف للناشر...', 'info');
-      await requestDriveAuthorization(true);
+      showToast('جاري التحقق من الترخيص السحابي للناشر...', 'info');
+      await requestDriveAuthorization(false);
       setIsDriveAuthorized(true);
-      showToast('✅ تم تفويض حساب Google Drive بنجاح، يمكنك الآن رفع الفيديو أوتوماتيكياً!', 'success');
+      showToast('✅ تم تأكيد الترخيص بنجاح، يمكنك الآن رفع الفيديو أوتوماتيكياً!', 'success');
     } catch (err: any) {
-      console.error('Google Drive auth error:', err);
-      showToast(err.message || 'تعذر إتمام تفويض حساب جوجل درايف', 'error');
+      console.error('Cloud auth error:', err);
+      showToast(err.message || 'تعذر إتمام الترخيص السحابي', 'error');
     } finally {
       setIsAuthorizingDrive(false);
     }
@@ -235,14 +240,14 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       }
 
       // ==========================================
-      // GOOGLE DRIVE DIRECT AUTOMATED UPLOAD FLOW
+      // HIGH-SPEED SECURE CLOUD STREAMING UPLOAD
       // ==========================================
       if (source === 'google_drive' && videoFile) {
         setUploadProgress({
           percent: 2,
           loadedBytes: 0,
           totalBytes: videoFile.size,
-          stage: 'جاري طلب تفويض جوجل درايف للناشر...'
+          stage: 'جاري التحقق من الترخيص السحابي وتجهيز الملف...'
         });
 
         const driveResult = await uploadVideoToGoogleDrive({
@@ -262,7 +267,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           percent: 98,
           loadedBytes: videoFile.size,
           totalBytes: videoFile.size,
-          stage: 'جاري تسجيل الفيديو وحمايته داخل مشغل الموقع...'
+          stage: 'جاري تسجيل وتشفير الفيديو وحمايته داخل مشغل الموقع...'
         });
 
         // 1. Create video record with driveFileId, embedUrl, and allowDownload = false
@@ -295,10 +300,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         await logUserActivity(
           currentUser,
           'upload_video',
-          `نشر ${type === 'short' ? 'شورت' : 'فيديو'}: ${title.trim()} (${visibility}) - تم الرفع أوتوماتيكياً إلى Google Drive مع منع التنزيل وحظر مشاركة الرابط`
+          `نشر ${type === 'short' ? 'شورت' : 'فيديو'}: ${title.trim()} (${visibility}) - تم الرفع السحابي مع منع التنزيل وحظر مشاركة الرابط المباشر`
         );
 
-        showToast('تم رفع الفيديو إلى Google Drive الخاص بك بنجاح مع تفعيل حظر التنزيل والمشاركة!', 'success');
+        showToast('تم رفع ونشر الفيديو بنجاح مع تفعيل حظر التنزيل وحماية المحتوى!', 'success');
         onSuccess(videoId);
         return;
       }
@@ -422,7 +427,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 حماية تلقائية للمحتوى
               </span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div className={`grid grid-cols-1 ${developerSettings?.allowDeviceDirectStorageUpload ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-2.5`}>
               <button
                 type="button"
                 onClick={() => {
@@ -437,29 +442,32 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               >
                 <div className="flex items-center gap-1.5 mb-1 text-cyan-300">
                   <HardDrive className="w-4 h-4 text-cyan-400" />
-                  <span>جوجل درايف</span>
+                  <span>الرفع السحابي فائق السرعة</span>
                 </div>
-                <span className="text-[10px] text-slate-400 font-normal">رفع إلى مساحتك الخاصة</span>
+                <span className="text-[10px] text-slate-400 font-normal">بث مشفر بدون استهلاك مساحة</span>
                 <span className="mt-1 px-2 py-0.5 rounded-full bg-cyan-900/60 text-[9px] text-cyan-300 font-bold border border-cyan-500/40">
                   موصى به - محمي
                 </span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setSource('file')}
-                className={`flex flex-col items-center justify-center p-3 rounded-2xl border text-xs font-bold transition-all ${
-                  source === 'file'
-                    ? 'bg-cyan-950 border-cyan-400 text-cyan-200 shadow-lg shadow-cyan-950/80 ring-1 ring-cyan-400'
-                    : 'bg-[#091224]/40 border-cyan-950 text-slate-400 hover:text-slate-200 hover:border-cyan-900/60'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 mb-1">
-                  <FileVideo className="w-4 h-4" />
-                  <span>تخزين فايربيس</span>
-                </div>
-                <span className="text-[10px] text-slate-400 font-normal">قاعدة بيانات سحابية</span>
-              </button>
+              {/* Device local storage upload: HIDDEN BY DEFAULT until enabled in Developer Panel */}
+              {developerSettings?.allowDeviceDirectStorageUpload && (
+                <button
+                  type="button"
+                  onClick={() => setSource('file')}
+                  className={`flex flex-col items-center justify-center p-3 rounded-2xl border text-xs font-bold transition-all ${
+                    source === 'file'
+                      ? 'bg-cyan-950 border-cyan-400 text-cyan-200 shadow-lg shadow-cyan-950/80 ring-1 ring-cyan-400'
+                      : 'bg-[#091224]/40 border-cyan-950 text-slate-400 hover:text-slate-200 hover:border-cyan-900/60'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <FileVideo className="w-4 h-4" />
+                    <span>تخزين الجهاز المباشر</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-normal">قاعدة بيانات سحابية</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -479,7 +487,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
             </div>
           </div>
 
-          {/* Google Drive Status & Protection Card */}
+          {/* Cloud Status & Protection Card */}
           {source === 'google_drive' && (
             <div className="p-3.5 rounded-2xl bg-gradient-to-br from-[#09152b] to-[#071020] border border-cyan-500/40 space-y-3 animate-in fade-in duration-200">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5">
@@ -489,10 +497,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   </div>
                   <div>
                     <h4 className="text-xs font-extrabold text-slate-100 flex items-center gap-1.5">
-                      <span>تفويض ورفع Google Drive للناشر</span>
+                      <span>الترخيص السحابي وحماية البث للناشر</span>
                     </h4>
                     <p className="text-[11px] text-slate-400">
-                      يتم رفع الفيديو مباشرة إلى جوجل درايف الخاص بك بحجم غير محدود
+                      يتم رفع الفيديو سحابياً بأعلى جودة مع تفعيل معايير الحماية المشددة
                     </p>
                   </div>
                 </div>
@@ -500,7 +508,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 {isDriveAuthorized ? (
                   <span className="px-3 py-1.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center gap-1.5 shrink-0">
                     <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                    تم التفويض بنجاح
+                    تم الترخيص بنجاح
                   </span>
                 ) : (
                   <button
@@ -514,7 +522,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                     ) : (
                       <Key className="w-3.5 h-3.5" />
                     )}
-                    <span>تفويض جوجل درايف الآن</span>
+                    <span>تأكيد الترخيص السحابي الآن</span>
                   </button>
                 )}
               </div>
@@ -523,17 +531,17 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               <div className="p-3 rounded-xl bg-[#060c18]/90 border border-cyan-900/60 space-y-1.5 text-[11px] text-slate-300 leading-relaxed">
                 <div className="font-bold text-cyan-300 flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0" />
-                  <span>سيتم تطبيق معايير الأمان والحماية التلقائية:</span>
+                  <span>معايير الأمان والحماية التلقائية المطبقة:</span>
                 </div>
                 <ul className="space-y-1 text-slate-300 ps-5 list-disc text-[10px]">
                   <li>
-                    <strong className="text-emerald-300">منع التنزيل أوتوماتيكياً:</strong> تفعيل قفل الحماية السحابي في درايف لمنع المشاهدين من تنزيل أو طباعة الفيديو.
+                    <strong className="text-emerald-300">منع التنزيل أوتوماتيكياً:</strong> تفعيل قفل الحماية السحابي لمنع المشاهدين من تنزيل أو حفظ الفيديو.
                   </li>
                   <li>
-                    <strong className="text-emerald-300">منع مشاركة رابط درايف:</strong> يتم تشغيل الفيديو داخل إطار محمي (Iframe) وتقتصر المشاركة على رابط الموقع فقط لحماية خصوصية حسابك.
+                    <strong className="text-emerald-300">منع تسريب الروابط:</strong> يتم تشغيل الفيديو داخل إطار مشفر وتقتصر المشاركة على رابط منصتك فقط.
                   </li>
                   <li>
-                    <strong className="text-emerald-300">طلب التفويض التلقائي:</strong> في حال عدم التفويض المسبق، سيظهر إذن التفويض الرسمي من جوجل تلقائياً عند النقر على نشر.
+                    <strong className="text-emerald-300">ترخيص لمرة واحدة فقط:</strong> يتم طلب إذن الرفع في أول مرة فقط، ثم يعمل الرفع بعد ذلك أوتوماتيكياً بدون أي نوافذ.
                   </li>
                 </ul>
               </div>
@@ -544,7 +552,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
           {(source === 'file' || source === 'google_drive') ? (
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-300">
-                {source === 'google_drive' ? 'اختر ملف الفيديو من جهازك للرفع إلى درايف' : t('chooseVideoFile')}
+                {source === 'google_drive' ? 'اختر ملف الفيديو من جهازك للرفع السحابي فائق السرعة' : t('chooseVideoFile')}
               </label>
               <label className="flex flex-col items-center justify-center border-2 border-dashed border-cyan-900/60 hover:border-cyan-400/80 rounded-2xl p-4 sm:p-6 bg-[#091224]/40 cursor-pointer transition-colors group">
                 <FileVideo className="w-8 h-8 text-cyan-400 mb-2 group-hover:scale-110 transition-transform" />
@@ -552,7 +560,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   {videoFile ? videoFile.name : t('selectVideoFromDevice')}
                 </span>
                 <span className="text-[10px] text-slate-400 mt-1">
-                  {source === 'google_drive' ? 'MP4, WebM, MOV من جهازك - سيتم نقله مباشرة إلى درايف الخاص بك' : 'MP4, WebM, MOV من ذاكرة جهازك'}
+                  {source === 'google_drive' ? 'MP4, WebM, MOV من جهازك - رفع مشفر فائق السرعة وحماية تلقائية' : 'MP4, WebM, MOV من ذاكرة جهازك'}
                 </span>
                 <input
                   type="file"
@@ -898,11 +906,11 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                   </div>
                   <div>
                     <h3 className="font-extrabold text-sm text-slate-100">
-                      {source === 'google_drive' ? 'شريط الرفع إلى Google Drive' : 'شريط رفع الفيديو السحابي'}
+                      {source === 'google_drive' ? 'شريط الرفع السحابي' : 'شريط رفع الفيديو السحابي'}
                     </h3>
                     <p className="text-[11px] text-cyan-400">
                       {source === 'google_drive'
-                        ? 'رفع مباشر لمساحة درايف الخاصة بك مع تفعيل حظر التنزيل وحظر الرابط'
+                        ? 'رفع سحابي مشفر مع تفعيل حظر التنزيل وحماية البث'
                         : 'تخزين في فايربيس كبيانات سحابية بدون تخزين محلي'}
                     </p>
                   </div>

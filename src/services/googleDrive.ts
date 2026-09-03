@@ -16,9 +16,13 @@ export const GOOGLE_DRIVE_CLIENT_ID =
   '799261220718-vit6eqldflqd9s24cftmbe1ucap9485d.apps.googleusercontent.com';
 export const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
-// In-memory token cache (never stored in localStorage)
-let cachedAccessToken: string | null = null;
-let tokenExpiresAt: number = 0;
+// In-memory and persistent token cache
+const TOKEN_STORAGE_KEY = 'neuro_yobe_drive_token';
+const EXPIRY_STORAGE_KEY = 'neuro_yobe_drive_expires';
+const AUTH_FLAG_KEY = 'neuro_yobe_drive_authorized';
+
+let cachedAccessToken: string | null = (typeof window !== 'undefined' && localStorage.getItem(TOKEN_STORAGE_KEY)) || null;
+let tokenExpiresAt: number = (typeof window !== 'undefined' && Number(localStorage.getItem(EXPIRY_STORAGE_KEY))) || 0;
 let tokenClientInstance: any = null;
 
 declare global {
@@ -97,19 +101,38 @@ export async function ensureGsiLoaded(): Promise<void> {
 }
 
 /**
- * Check if we already have an active valid in-memory access token
+ * Check if the publisher has previously authorized cloud upload
  */
-export function hasValidDriveToken(): boolean {
-  return !!cachedAccessToken && Date.now() < (tokenExpiresAt - 60000);
+export function isDrivePreviouslyAuthorized(): boolean {
+  return typeof window !== 'undefined' && localStorage.getItem(AUTH_FLAG_KEY) === 'true';
 }
 
 /**
- * Request OAuth authorization from the publisher for Google Drive
- * Opens Google's official authorization dialog asking the publisher to permit
- * uploading files to their Google Drive with drive.file scope.
+ * Check if we already have an active valid in-memory or persisted access token
+ */
+export function hasValidDriveToken(): boolean {
+  if (cachedAccessToken && Date.now() < (tokenExpiresAt - 60000)) {
+    return true;
+  }
+  if (typeof window !== 'undefined') {
+    const savedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+    const savedExpiry = Number(localStorage.getItem(EXPIRY_STORAGE_KEY) || 0);
+    if (savedToken && Date.now() < (savedExpiry - 60000)) {
+      cachedAccessToken = savedToken;
+      tokenExpiresAt = savedExpiry;
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Request OAuth authorization for cloud video upload
+ * Asks the publisher once on the very first upload. Subsequent uploads
+ * are authenticated automatically in the background without prompting.
  */
 export async function requestDriveAuthorization(forceConsent: boolean = false): Promise<string> {
-  // Return cached token if still valid and not forcing consent
+  // Return cached or saved token if still valid and not explicitly forcing consent
   if (!forceConsent && hasValidDriveToken() && cachedAccessToken) {
     return cachedAccessToken;
   }
@@ -117,8 +140,10 @@ export async function requestDriveAuthorization(forceConsent: boolean = false): 
   await ensureGsiLoaded();
 
   if (!window.google?.accounts?.oauth2) {
-    throw new Error('خدمة تفويض جوجل غير متاحة حالياً. تأكد من اتصال الإنترنت.');
+    throw new Error('خدمة الربط السحابي غير متاحة حالياً. يرجى التحقق من اتصال الإنترنت.');
   }
+
+  const wasPreviouslyAuthorized = isDrivePreviouslyAuthorized();
 
   return new Promise((resolve, reject) => {
     try {
@@ -127,36 +152,52 @@ export async function requestDriveAuthorization(forceConsent: boolean = false): 
         scope: GOOGLE_DRIVE_SCOPE,
         callback: (resp) => {
           if (resp.error) {
-            console.error('Google OAuth error:', resp);
+            console.error('Cloud OAuth error:', resp);
             if (resp.error === 'origin_mismatch' || (resp.error_description && resp.error_description.includes('origin_mismatch'))) {
-              reject(new Error('خطأ 400 origin_mismatch: مصدر الموقع الحالي غير مدرج في أصول JavaScript المعتمدة داخل Google Cloud Console لهذا الـ Client ID.'));
+              reject(new Error('خطأ origin_mismatch: يرجى التأكد من إضافة نطاق الموقع في Google Cloud Console.'));
               return;
             }
-            reject(new Error(resp.error_description || resp.error || 'تم إلغاء التفويض من قبل المستخدم'));
+            // If silent prompt failed because permission was revoked, try once with consent
+            if (!forceConsent && wasPreviouslyAuthorized && resp.error === 'interaction_required') {
+              requestDriveAuthorization(true).then(resolve).catch(reject);
+              return;
+            }
+            reject(new Error(resp.error_description || resp.error || 'تم إلغاء التفويض'));
             return;
           }
           if (!resp.access_token) {
-            reject(new Error('لم يتم استلام رمز الوصول من جوجل'));
+            reject(new Error('لم يتم استلام رمز الوصول السحابي'));
             return;
           }
 
           cachedAccessToken = resp.access_token;
           const expiresIn = resp.expires_in || 3599;
           tokenExpiresAt = Date.now() + expiresIn * 1000;
+
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem(TOKEN_STORAGE_KEY, resp.access_token);
+              localStorage.setItem(EXPIRY_STORAGE_KEY, String(tokenExpiresAt));
+              localStorage.setItem(AUTH_FLAG_KEY, 'true');
+            } catch {}
+          }
+
           resolve(cachedAccessToken);
         },
         error_callback: (err) => {
-          console.error('Google OAuth error callback:', err);
-          reject(new Error('فشل إتمام التفويض لحساب جوجل'));
+          console.error('Cloud OAuth error callback:', err);
+          reject(new Error('فشل إتمام التصريح السحابي'));
         }
       });
 
-      // Request token with consent prompt when required
+      // If user was previously authorized, attempt completely silent token retrieval (prompt: '')
+      // Only show the interactive consent dialog if it's their very first time or explicit consent requested
+      const promptMode = (!wasPreviouslyAuthorized || forceConsent) ? 'consent' : '';
       tokenClientInstance.requestAccessToken({
-        prompt: forceConsent ? 'consent' : ''
+        prompt: promptMode
       });
     } catch (err: any) {
-      reject(new Error(err.message || 'حدث خطأ أثناء فتح نافذة تفويض جوجل'));
+      reject(new Error(err.message || 'حدث خطأ أثناء فتح التصريح السحابي'));
     }
   });
 }

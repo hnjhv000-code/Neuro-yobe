@@ -40,6 +40,10 @@ interface ShortsViewerProps {
   currentUser: UserProfile | null;
   language: Language;
   subscriptions: SubscriptionItem[];
+  initialShortId?: string;
+  channelFilterUid?: string;
+  isModal?: boolean;
+  onClose?: () => void;
   onOpenAuth: () => void;
   onSelectChannel?: (channelUid: string) => void;
 }
@@ -49,10 +53,29 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
   currentUser,
   language,
   subscriptions,
+  initialShortId,
+  channelFilterUid,
+  isModal = false,
+  onClose,
   onOpenAuth,
   onSelectChannel
 }) => {
-  const [currentIndex, setCurrentIndex] = useState(0);
+  // If entered from a channel page, only browse that specific channel's shorts
+  const effectiveShorts = React.useMemo(() => {
+    if (channelFilterUid) {
+      const filtered = shorts.filter((s) => s.publisherUid === channelFilterUid);
+      return filtered.length > 0 ? filtered : shorts;
+    }
+    return shorts;
+  }, [shorts, channelFilterUid]);
+
+  const [currentIndex, setCurrentIndex] = useState(() => {
+    if (initialShortId) {
+      const idx = effectiveShorts.findIndex((s) => s.id === initialShortId);
+      return idx >= 0 ? idx : 0;
+    }
+    return 0;
+  });
   const [isMuted, setIsMuted] = useState(true);
   const [showHeartAnim, setShowHeartAnim] = useState(false);
   const [heartCoords, setHeartCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -67,11 +90,21 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const lastTapRef = useRef<number>(0);
+  const wheelCooldownRef = useRef(false);
+  const touchStartYRef = useRef<number | null>(null);
 
   const { showToast } = useToast();
   const t = (key: string) => getTranslation(language, key);
 
-  const currentShort = shorts[currentIndex];
+  // Sync initial short if changed externally
+  useEffect(() => {
+    if (initialShortId) {
+      const idx = effectiveShorts.findIndex((s) => s.id === initialShortId);
+      if (idx >= 0) setCurrentIndex(idx);
+    }
+  }, [initialShortId, effectiveShorts]);
+
+  const currentShort = effectiveShorts[currentIndex];
 
   // Subscribe to comments for active short
   useEffect(() => {
@@ -84,7 +117,7 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
 
   // Load blob for local files
   useEffect(() => {
-    shorts.forEach((s) => {
+    effectiveShorts.forEach((s) => {
       if (s.fileBlobKey && !localBlobUrls[s.id]) {
         getVideoBlobUrl(s.fileBlobKey).then((url) => {
           if (url) {
@@ -93,7 +126,7 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
         });
       }
     });
-  }, [shorts]);
+  }, [effectiveShorts]);
 
   // Track view and history
   useEffect(() => {
@@ -115,7 +148,7 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
   }, [currentIndex, currentShort?.id, currentUser?.uid]);
 
   const handleNext = () => {
-    if (currentIndex < shorts.length - 1) {
+    if (currentIndex < effectiveShorts.length - 1) {
       setCurrentIndex((prev) => prev + 1);
     }
   };
@@ -124,6 +157,40 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
     if (currentIndex > 0) {
       setCurrentIndex((prev) => prev - 1);
     }
+  };
+
+  // Wheel (Mouse Scroll) Navigation: easily scroll up and down
+  const handleWheel = (e: React.WheelEvent) => {
+    if (wheelCooldownRef.current) return;
+    if (Math.abs(e.deltaY) > 25) {
+      wheelCooldownRef.current = true;
+      if (e.deltaY > 0) {
+        handleNext();
+      } else {
+        handlePrev();
+      }
+      setTimeout(() => {
+        wheelCooldownRef.current = false;
+      }, 350);
+    }
+  };
+
+  // Touch Swipe Navigation for mobile devices
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartYRef.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartYRef.current === null) return;
+    const deltaY = touchStartYRef.current - e.changedTouches[0].clientY;
+    if (Math.abs(deltaY) > 40) {
+      if (deltaY > 0) {
+        handleNext();
+      } else {
+        handlePrev();
+      }
+    }
+    touchStartYRef.current = null;
   };
 
   // Keyboard navigation
@@ -135,11 +202,13 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
         handlePrev();
       } else if (e.key === 'm') {
         setIsMuted((prev) => !prev);
+      } else if (e.key === 'Escape' && onClose) {
+        onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, shorts.length]);
+  }, [currentIndex, effectiveShorts.length, onClose]);
 
   const handleDoubleTap = (e: React.MouseEvent) => {
     const now = Date.now();
@@ -247,37 +316,70 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
     : (currentShort?.source === 'external' && currentShort.externalUrl ? parseVideoUrl(currentShort.externalUrl) : null);
 
   return (
-    <div className="relative w-full h-[calc(100vh-4rem)] flex items-center justify-center overflow-hidden bg-black py-2">
+    <div
+      className={
+        isModal
+          ? 'fixed inset-0 z-50 flex items-center justify-center overflow-hidden bg-black/95 backdrop-blur-2xl p-0 sm:p-4 animate-in fade-in duration-200'
+          : 'relative w-full h-[calc(100vh-4rem)] flex items-center justify-center overflow-hidden bg-black py-2'
+      }
+    >
+      {/* Close button for Modal mode */}
+      {onClose && (
+        <button
+          onClick={onClose}
+          className="absolute top-4 end-4 z-40 p-2.5 rounded-full bg-black/70 hover:bg-cyan-950 text-white border border-white/20 hover:border-cyan-400 shadow-xl backdrop-blur-md transition-all cursor-pointer"
+          title="إغلاق (Esc)"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      )}
+
       {/* Navigation Arrows for Tablet & Desktop */}
       <div className="hidden sm:flex flex-col gap-4 absolute end-6 top-1/2 -translate-y-1/2 z-30">
         <button
           onClick={handlePrev}
           disabled={currentIndex === 0}
-          className="p-3.5 rounded-full bg-[#091224]/80 hover:bg-cyan-950 border border-cyan-900/60 disabled:opacity-30 text-white shadow-xl backdrop-blur-xl transition-all"
+          className="p-3.5 rounded-full bg-[#091224]/80 hover:bg-cyan-950 border border-cyan-900/60 disabled:opacity-30 text-white shadow-xl backdrop-blur-xl transition-all cursor-pointer"
+          title="السابق (سهم لأعلى)"
         >
           <ChevronUp className="w-6 h-6" />
         </button>
         <button
           onClick={handleNext}
-          disabled={currentIndex === shorts.length - 1}
-          className="p-3.5 rounded-full bg-[#091224]/80 hover:bg-cyan-950 border border-cyan-900/60 disabled:opacity-30 text-white shadow-xl backdrop-blur-xl transition-all"
+          disabled={currentIndex === effectiveShorts.length - 1}
+          className="p-3.5 rounded-full bg-[#091224]/80 hover:bg-cyan-950 border border-cyan-900/60 disabled:opacity-30 text-white shadow-xl backdrop-blur-xl transition-all cursor-pointer"
+          title="التالي (سهم لأسفل)"
         >
           <ChevronDown className="w-6 h-6" />
         </button>
       </div>
 
-      {/* Main Short Reel Container */}
+      {/* Main Short Reel Container with Responsive Fullscreen & Calculated 9:16 Aspect Ratio */}
       <div
         ref={containerRef}
         onClick={handleDoubleTap}
+        onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
         onContextMenu={(e) => {
           if (isGoogleDrive) {
             e.preventDefault();
             showToast('حماية المحتوى: تم حظر الوصول للرابط أو التنزيل', 'info');
           }
         }}
-        className="relative h-full aspect-[9/16] max-h-[820px] rounded-3xl overflow-hidden bg-[#070e1c] border border-cyan-900/40 shadow-2xl shadow-cyan-950/80 flex items-center justify-center select-none"
+        className={`relative w-full ${
+          isModal ? 'h-[100dvh] sm:h-full sm:max-h-[880px]' : 'h-full max-h-[840px]'
+        } max-w-[480px] sm:aspect-[9/16] ${
+          isModal ? 'rounded-none sm:rounded-3xl' : 'rounded-3xl'
+        } overflow-hidden bg-[#070e1c] border border-cyan-900/40 shadow-2xl shadow-cyan-950/80 flex items-center justify-center select-none`}
       >
+        {/* Channel Scope Badge when browsing channel's shorts */}
+        {channelFilterUid && currentShort && (
+          <div className="absolute top-4 start-16 z-30 pointer-events-none flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#050a14]/80 backdrop-blur-md border border-cyan-500/40 text-[10px] text-cyan-300 font-bold shadow-lg">
+            <span>شورتس القناة: {currentShort.publisherName}</span>
+            <span className="text-cyan-400/70 font-mono">({currentIndex + 1}/{effectiveShorts.length})</span>
+          </div>
+        )}
         {/* Video / Iframe */}
         {parsed && parsed.isEmbed && parsed.embedUrl ? (
           <div className="relative w-full h-full">
@@ -288,21 +390,21 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
               allowFullScreen
               className="w-full h-full object-cover border-0"
             />
-            {/* Anti-Popout Protective Overlay for Google Drive: Prevents clicking "Open in new window" button */}
+            {/* Anti-Popout Protective Overlay: Prevents clicking "Open in new window" button */}
             {isGoogleDrive && (
               <>
                 <div
                   className="absolute top-0 end-0 h-14 w-16 z-20 cursor-default select-none pointer-events-auto bg-transparent"
-                  title="مشغل محمي - تم حظر فتح أو مشاركة رابط جوجل درايف المباشر"
+                  title="مشغل محمي - تم تفعيل الحماية المشددة للمحتوى"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    showToast('تم حظر فتح أو مشاركة رابط جوجل درايف المباشر لحماية حقوق الناشر', 'info');
+                    showToast('حماية المحتوى: تم حظر فتح أو مشاركة الرابط المباشر', 'info');
                   }}
                 />
                 <div className="absolute top-4 end-4 z-10 pointer-events-none flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#050a14]/85 backdrop-blur-md border border-cyan-500/40 text-[10px] text-cyan-300 font-bold shadow-lg">
-                  <HardDrive className="w-3 h-3 text-cyan-400" />
-                  <span>Google Drive محمي</span>
+                  <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>بث سحابي محمي</span>
                 </div>
               </>
             )}

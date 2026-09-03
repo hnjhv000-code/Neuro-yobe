@@ -186,8 +186,28 @@ export const AppContent: React.FC = () => {
   const [selectedChannelUid, setSelectedChannelUid] = useState<string | null>(null);
   const [selectedChannelUser, setSelectedChannelUser] = useState<UserProfile | null>(null);
 
-  // Active Video for Playback
+  // Active Video for Playback (Landscape Videos)
   const [activeVideo, setActiveVideo] = useState<VideoItem | null>(null);
+  // Active Short Modal (Portrait Shorts Fullscreen)
+  const [activeShortModal, setActiveShortModal] = useState<{
+    short: VideoItem;
+    channelUid?: string;
+  } | null>(null);
+
+  // Unified opener that opens portrait Shorts in ShortsViewer and standard videos in VideoPlayerModal
+  const handleOpenVideo = (video: VideoItem, channelContextUid?: string) => {
+    if (video.type === 'short') {
+      setActiveVideo(null);
+      setActiveShortModal({
+        short: video,
+        channelUid: channelContextUid || (currentRoute === 'channel' && selectedChannelUid ? selectedChannelUid : undefined)
+      });
+    } else {
+      setActiveShortModal(null);
+      setActiveVideo(video);
+    }
+  };
+
   const [playlistVideoToAdd, setPlaylistVideoToAdd] = useState<VideoItem | null>(null);
 
   // Modals visibility
@@ -358,7 +378,7 @@ export const AppContent: React.FC = () => {
 
     if (videoId && allVideos.length > 0) {
       const found = allVideos.find((v) => v.id === videoId);
-      if (found) setActiveVideo(found);
+      if (found) handleOpenVideo(found);
     }
 
     if (channelId) {
@@ -516,7 +536,7 @@ export const AppContent: React.FC = () => {
           setSearchQuery(q);
           setCurrentRoute('home');
         }}
-        onSelectVideo={(v) => setActiveVideo(v)}
+        onSelectVideo={(v) => handleOpenVideo(v)}
         developerSettings={developerSettings}
         onNavigate={(r) => {
           setCurrentRoute(r);
@@ -589,7 +609,7 @@ export const AppContent: React.FC = () => {
                     {shortsVideos.slice(0, 6).map((short) => (
                       <div
                         key={short.id}
-                        onClick={() => setActiveVideo(short)}
+                        onClick={() => handleOpenVideo(short)}
                         className="group relative aspect-[9/16] rounded-2xl overflow-hidden bg-slate-900 border border-cyan-950/60 hover:border-rose-500/60 cursor-pointer shadow-lg transition-all hover:scale-105"
                       >
                         <img
@@ -646,7 +666,7 @@ export const AppContent: React.FC = () => {
                         video={video}
                         language={language}
                         currentUser={currentUser}
-                        onSelect={(v) => setActiveVideo(v)}
+                        onSelect={(v) => handleOpenVideo(v)}
                         onSaveToWatchLater={() => {
                           showToast(t('savedSuccess'), 'success');
                         }}
@@ -699,7 +719,7 @@ export const AppContent: React.FC = () => {
                       video={video}
                       language={language}
                       currentUser={currentUser}
-                      onSelect={(v) => setActiveVideo(v)}
+                      onSelect={(v) => handleOpenVideo(v)}
                       onOpenAuth={() => setShowAuthModal(true)}
                       onSelectChannel={handleSelectChannel}
                     />
@@ -757,7 +777,7 @@ export const AppContent: React.FC = () => {
                       video={video}
                       language={language}
                       currentUser={currentUser}
-                      onSelect={(v) => setActiveVideo(v)}
+                      onSelect={(v) => handleOpenVideo(v)}
                       onOpenAuth={() => setShowAuthModal(true)}
                       onSelectChannel={handleSelectChannel}
                     />
@@ -801,7 +821,7 @@ export const AppContent: React.FC = () => {
                       video={video}
                       language={language}
                       currentUser={currentUser}
-                      onSelect={(v) => setActiveVideo(v)}
+                      onSelect={(v) => handleOpenVideo(v)}
                       onOpenAuth={() => setShowAuthModal(true)}
                       onSelectChannel={handleSelectChannel}
                     />
@@ -845,7 +865,7 @@ export const AppContent: React.FC = () => {
                       video={video}
                       language={language}
                       currentUser={currentUser}
-                      onSelect={(v) => setActiveVideo(v)}
+                      onSelect={(v) => handleOpenVideo(v)}
                       onOpenAuth={() => setShowAuthModal(true)}
                       onSelectChannel={handleSelectChannel}
                     />
@@ -889,7 +909,7 @@ export const AppContent: React.FC = () => {
                       video={video}
                       language={language}
                       currentUser={currentUser}
-                      onSelect={(v) => setActiveVideo(v)}
+                      onSelect={(v) => handleOpenVideo(v)}
                       onOpenAuth={() => setShowAuthModal(true)}
                       onSelectChannel={handleSelectChannel}
                     />
@@ -1026,7 +1046,7 @@ export const AppContent: React.FC = () => {
               allPosts={allPosts}
               subscriptions={subscriptions}
               language={language}
-              onSelectVideo={(v) => setActiveVideo(v)}
+              onSelectVideo={(v) => handleOpenVideo(v, selectedChannelUser.uid)}
               onOpenAuth={() => setShowAuthModal(true)}
               onOpenUpload={() => setShowUploadModal(true)}
               onOpenCreatePost={() => setShowCreatePostModal(true)}
@@ -1069,7 +1089,7 @@ export const AppContent: React.FC = () => {
               language={language}
               currentUser={currentUser}
               onNavigateBack={() => setCurrentRoute('home')}
-              onSelectVideo={(v) => setActiveVideo(v)}
+              onSelectVideo={(v) => handleOpenVideo(v)}
               onOpenNotificationDetail={(notif) => setSelectedNotificationForDetail(notif)}
             />
           )}
@@ -1178,7 +1198,7 @@ export const AppContent: React.FC = () => {
         </main>
       </div>
 
-      {/* MODAL 1: Video Player Modal */}
+      {/* MODAL 1: Video Player Modal (Landscape Videos) */}
       {activeVideo && (
         <VideoPlayerModal
           video={activeVideo}
@@ -1187,9 +1207,34 @@ export const AppContent: React.FC = () => {
           language={language}
           subscriptions={subscriptions}
           onClose={() => setActiveVideo(null)}
-          onSelectVideo={(v) => setActiveVideo(v)}
+          onSelectVideo={(v) => handleOpenVideo(v)}
           onOpenAuth={() => setShowAuthModal(true)}
           onSelectChannel={handleSelectChannel}
+        />
+      )}
+
+      {/* MODAL 1.5: Shorts Fullscreen Portrait Viewer */}
+      {activeShortModal && (
+        <ShortsViewer
+          shorts={
+            activeShortModal.channelUid
+              ? allVideos
+                  .filter(isVideoVisibleToUser)
+                  .filter((v) => v.type === 'short' && v.publisherUid === activeShortModal.channelUid)
+              : shortsVideos
+          }
+          channelFilterUid={activeShortModal.channelUid}
+          initialShortId={activeShortModal.short.id}
+          isModal={true}
+          onClose={() => setActiveShortModal(null)}
+          currentUser={currentUser}
+          language={language}
+          subscriptions={subscriptions}
+          onOpenAuth={() => setShowAuthModal(true)}
+          onSelectChannel={(chId) => {
+            setActiveShortModal(null);
+            handleSelectChannel(chId);
+          }}
         />
       )}
 
@@ -1198,11 +1243,12 @@ export const AppContent: React.FC = () => {
         <UploadModal
           currentUser={currentUser}
           language={language}
+          developerSettings={developerSettings}
           onClose={() => setShowUploadModal(false)}
           onSuccess={(videoId) => {
             setShowUploadModal(false);
             const found = allVideos.find((v) => v.id === videoId);
-            if (found) setActiveVideo(found);
+            if (found) handleOpenVideo(found);
           }}
         />
       )}
@@ -1239,7 +1285,7 @@ export const AppContent: React.FC = () => {
           developerSettings={developerSettings}
           onSelectVideo={(v) => {
             setShowDeveloperPanel(false);
-            setActiveVideo(v);
+            handleOpenVideo(v);
           }}
         />
       )}
@@ -1275,7 +1321,7 @@ export const AppContent: React.FC = () => {
           language={language}
           onSelectVideo={(v) => {
             setSelectedNotificationForDetail(null);
-            setActiveVideo(v);
+            handleOpenVideo(v);
           }}
           allVideos={allVideos}
         />

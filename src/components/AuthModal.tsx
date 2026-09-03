@@ -11,7 +11,8 @@ import {
   EyeOff,
   Smartphone,
   CheckCircle2,
-  UploadCloud
+  UploadCloud,
+  ArrowRight
 } from 'lucide-react';
 import {
   signInWithEmail,
@@ -46,7 +47,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Mode: login | signup
   const [mode, setMode] = useState<'login' | 'signup'>('login');
 
-  // Sign Up fields
+  // Sign Up fields (regular email/phone)
   const [username, setUsername] = useState('');
   const [avatarDataUrl, setAvatarDataUrl] = useState<string>(
     'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80'
@@ -63,61 +64,211 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
+  // -------------------------------------------------------------
+  // Google Auth 2-Step Flows:
+  // - google_signup_details: Prompt for name, photo from device, password
+  // - google_login_password: Prompt for password of existing account
+  // -------------------------------------------------------------
+  type GoogleFlowStep = 'idle' | 'google_signup_details' | 'google_login_password';
+  const [googleStep, setGoogleStep] = useState<GoogleFlowStep>('idle');
+  const [googleCred, setGoogleCred] = useState<{
+    uid: string;
+    email: string;
+    displayName?: string;
+    photoURL?: string;
+  } | null>(null);
+  const [googleProfile, setGoogleProfile] = useState<UserProfile | null>(null);
+
+  // Google Signup step fields
+  const [googleUsername, setGoogleUsername] = useState('');
+  const [googleAvatarUrl, setGoogleAvatarUrl] = useState(
+    'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80'
+  );
+  const [googleAvatarChosen, setGoogleAvatarChosen] = useState(false);
+  const [googlePassword, setGooglePassword] = useState('');
+  const [showGooglePassword, setShowGooglePassword] = useState(false);
+
+  // Google Login step fields
+  const [googleVerifyPassword, setGoogleVerifyPassword] = useState('');
+  const [showGoogleVerifyPassword, setShowGoogleVerifyPassword] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const googleFileInputRef = useRef<HTMLInputElement>(null);
   const { showToast } = useToast();
   const t = (key: string, fallback = '') => getTranslation(language, key, fallback);
 
-  // Google Sign-In Handler
-  const handleGoogleSignIn = async () => {
+  // Google Sign-In / Sign-Up Trigger
+  const handleGoogleAuth = async () => {
     setGoogleLoading(true);
     try {
       showToast(t('openingGoogleAuth', 'جاري فتح نافذة المصادقة عبر Google...'), 'info');
       const cred = await signInWithGoogle();
       
-      let userProfile = await getUserProfile(cred.uid);
-      if (!userProfile) {
-        userProfile = {
-          uid: cred.uid,
-          email: cred.email || `${cred.uid}@google.user`,
-          username: cred.displayName || (cred.email ? cred.email.split('@')[0] : 'Google User'),
-          avatarUrl: cred.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80',
-          registeredAt: Date.now(),
-          lastLoginAt: Date.now(),
-          subscribersCount: 0,
-          totalViews: 0,
-          deviceType: getDeviceType(),
-          emailVerified: true,
-          provider: 'google',
-          isBlocked: false
-        };
-        await saveUserProfile(userProfile);
-      } else {
-        userProfile = {
-          ...userProfile,
-          lastLoginAt: Date.now(),
-          emailVerified: true,
-          provider: 'google'
-        };
-        if (cred.photoURL && !userProfile.avatarUrl) {
-          userProfile.avatarUrl = cred.photoURL;
-        }
-        await saveUserProfile(userProfile);
+      let existing = await getUserProfile(cred.uid);
+      if (!existing && cred.email) {
+        existing = await findUserByEmail(cred.email);
       }
 
-      localStorage.removeItem('yassa_phone_user_uid');
+      setGoogleCred({
+        uid: cred.uid,
+        email: cred.email || `${cred.uid}@google.user`,
+        displayName: cred.displayName || '',
+        photoURL: cred.photoURL || ''
+      });
 
-      try {
-        await logUserActivity(userProfile, 'login', 'سجل الدخول بحساب Google');
-      } catch {}
-
-      showToast(`${t('welcomeBack', 'مرحباً بك')} ${userProfile.username}! ${t('loginSuccess', 'تم تسجيل الدخول بنجاح')}`, 'success');
-      onSuccess(userProfile);
-      onClose();
+      if (mode === 'signup') {
+        if (existing) {
+          // Account already exists -> prompt for password to log in
+          showToast('هذا الحساب مسجل مسبقاً، يرجى إدخال كلمة المرور لتسجيل الدخول', 'info');
+          setGoogleProfile(existing);
+          setGoogleVerifyPassword('');
+          setGoogleStep('google_login_password');
+        } else {
+          // New account -> prompt for name, photo from device, password
+          setGoogleUsername(cred.displayName || (cred.email ? cred.email.split('@')[0] : ''));
+          setGoogleAvatarUrl(
+            'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80'
+          );
+          setGoogleAvatarChosen(false);
+          setGooglePassword('');
+          setGoogleStep('google_signup_details');
+        }
+      } else {
+        // mode === 'login'
+        if (existing) {
+          setGoogleProfile(existing);
+          setGoogleVerifyPassword('');
+          setGoogleStep('google_login_password');
+        } else {
+          showToast('هذا الحساب غير مسجل بعد، يرجى إكمال إنشاء حسابك الجديد', 'info');
+          setGoogleUsername(cred.displayName || (cred.email ? cred.email.split('@')[0] : ''));
+          setGoogleAvatarUrl(
+            'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80'
+          );
+          setGoogleAvatarChosen(false);
+          setGooglePassword('');
+          setGoogleStep('google_signup_details');
+        }
+      }
     } catch (err: any) {
-      console.warn('Google sign-in error:', err);
+      console.warn('Google auth error:', err);
       showToast(err.message || t('googleAuthError', 'فشل تسجيل الدخول باستخدام Google'), 'error');
     } finally {
       setGoogleLoading(false);
+    }
+  };
+
+  // Complete Google Signup (Name, Device Photo, Password)
+  const handleCompleteGoogleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleCred) return;
+
+    const trimmedUsername = googleUsername.trim();
+    if (!trimmedUsername) {
+      showToast('يرجى إدخال اسم الحساب', 'error');
+      return;
+    }
+
+    if (!googlePassword || googlePassword.length < 6) {
+      showToast('يرجى إدخال كلمة مرور لا تقل عن 6 أحرف', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const passwordHash = hashPassword(googlePassword);
+      const newProfile: UserProfile = {
+        uid: googleCred.uid,
+        email: googleCred.email,
+        username: trimmedUsername,
+        avatarUrl: googleAvatarUrl,
+        password: googlePassword,
+        passwordHash,
+        registeredAt: Date.now(),
+        lastLoginAt: Date.now(),
+        subscribersCount: 0,
+        totalViews: 0,
+        deviceType: getDeviceType(),
+        emailVerified: true,
+        provider: 'google',
+        isBlocked: false
+      };
+
+      await saveUserProfile(newProfile);
+      localStorage.removeItem('yassa_phone_user_uid');
+
+      try {
+        await logUserActivity(newProfile, 'signup', 'تم إنشاء الحساب عبر Google بنجاح');
+      } catch {}
+
+      showToast(`أهلاً بك يا ${newProfile.username}! تم إنشاء حسابك بنجاح 🎉`, 'success');
+      onSuccess(newProfile);
+      onClose();
+    } catch (err: any) {
+      showToast(err.message || 'حدث خطأ أثناء إتمام إنشاء الحساب', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Verify Google Login Password
+  const handleVerifyGoogleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleProfile) return;
+
+    if (!googleVerifyPassword) {
+      showToast('يرجى إدخال كلمة المرور', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const enteredHash = hashPassword(googleVerifyPassword);
+      const isMatch =
+        (googleProfile.passwordHash && googleProfile.passwordHash === enteredHash) ||
+        (googleProfile.password && googleProfile.password === googleVerifyPassword);
+
+      if (!isMatch && (googleProfile.passwordHash || googleProfile.password)) {
+        showToast('كلمة المرور غير صحيحة، يرجى المحاولة مرة أخرى', 'error');
+        setLoading(false);
+        return;
+      }
+
+      const updated: UserProfile = {
+        ...googleProfile,
+        lastLoginAt: Date.now(),
+        emailVerified: true
+      };
+
+      await saveUserProfile(updated);
+      localStorage.removeItem('yassa_phone_user_uid');
+
+      try {
+        await logUserActivity(updated, 'login', 'سجل الدخول بحساب Google');
+      } catch {}
+
+      showToast(`مرحباً بك مجدداً يا ${updated.username}! تم تسجيل الدخول بنجاح`, 'success');
+      onSuccess(updated);
+      onClose();
+    } catch (err: any) {
+      showToast(err.message || 'حدث خطأ أثناء تسجيل الدخول', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle Google avatar upload from device
+  const handleGoogleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      showToast(t('avatarProcessing', 'جاري معالجة الصورة من جهازك...'), 'info');
+      const compressed = await compressDeviceImage(file, 300, 300, 0.88);
+      setGoogleAvatarUrl(compressed);
+      setGoogleAvatarChosen(true);
+      showToast(t('avatarProcessedSuccess', 'تم اختيار الصورة الشخصية بنجاح من جهازك'), 'success');
+    } catch (err: any) {
+      showToast(err.message || t('avatarError', 'فشل في تحميل الصورة من الجهاز'), 'error');
     }
   };
 
@@ -363,24 +514,238 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        {/* Header Icon & Title */}
-        <div className="text-center mb-4 shrink-0">
-          <div className="inline-flex p-3 rounded-2xl bg-cyan-950/80 border border-cyan-500/30 text-cyan-400 mb-2 shadow-inner">
-            {mode === 'login' ? (
-              <LogIn className="w-6 h-6" />
-            ) : (
-              <UserPlus className="w-6 h-6" />
-            )}
+        {/* =========================================================================
+            VIEW A: Google Sign-Up Step 2 (اسم الحساب + صورة من الجهاز + كلمة المرور)
+           ========================================================================= */}
+        {googleStep === 'google_signup_details' && (
+          <div className="flex flex-col flex-1 overflow-y-auto pe-1">
+            <button
+              type="button"
+              onClick={() => setGoogleStep('idle')}
+              className="inline-flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 mb-3 cursor-pointer self-start"
+            >
+              <ArrowRight className="w-4 h-4 rtl:rotate-0 rotate-180" />
+              <span>العودة للخيارات السابقة</span>
+            </button>
+
+            <div className="text-center mb-4 shrink-0">
+              <div className="inline-flex p-2.5 rounded-2xl bg-cyan-950/80 border border-cyan-500/30 text-cyan-400 mb-2 shadow-inner">
+                <UserPlus className="w-6 h-6" />
+              </div>
+              <h2 className="text-lg font-black text-slate-100">إكمال إنشاء حسابك عبر Google</h2>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-950/50 border border-emerald-500/30 text-emerald-400 text-xs mt-1.5 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{googleCred?.email}</span>
+              </div>
+              <p className="text-xs text-slate-400 mt-2">
+                اختر اسم حسابك وصورة شخصية من جهازك وكلمة المرور لإتمام التسجيل
+              </p>
+            </div>
+
+            <form onSubmit={handleCompleteGoogleSignup} className="space-y-4 flex-1">
+              {/* صورة الحساب من الجهاز */}
+              <div className="flex flex-col items-center justify-center p-3 rounded-2xl bg-[#040813]/70 border border-cyan-950/60">
+                <div
+                  className="relative group cursor-pointer"
+                  onClick={() => googleFileInputRef.current?.click()}
+                  title="انقر لاختيار صورة من جهازك"
+                >
+                  <div className="w-20 h-20 rounded-full overflow-hidden border-2 border-cyan-400/80 shadow-lg shadow-cyan-950/80 bg-slate-900 flex items-center justify-center">
+                    <img
+                      src={googleAvatarUrl}
+                      alt="صورة الحساب"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="absolute inset-0 bg-black/60 rounded-full flex flex-col items-center justify-center opacity-80 group-hover:opacity-100 transition-opacity">
+                    <Camera className="w-5 h-5 text-cyan-300" />
+                    <span className="text-[9px] font-bold text-cyan-200 mt-0.5">صورة من الجهاز</span>
+                  </div>
+                  {googleAvatarChosen && (
+                    <div className="absolute -bottom-1 -end-1 bg-emerald-500 text-white rounded-full p-1 shadow-md">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    </div>
+                  )}
+                </div>
+
+                <input
+                  ref={googleFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleGoogleAvatarFileChange}
+                  className="hidden"
+                />
+                <span className="text-[11px] text-slate-400 mt-2">
+                  {googleAvatarChosen ? 'تم تحديد صورة من جهازك بنجاح' : 'انقر لاختيار صورة مخصصة من جهازك'}
+                </span>
+              </div>
+
+              {/* اسم الحساب */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  اسم الحساب أو القناة <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative flex items-center">
+                  <User className="w-4 h-4 text-cyan-400 absolute start-3 pointer-events-none" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="مثال: ياسة تيوب أو اسمك الكامل"
+                    value={googleUsername}
+                    onChange={(e) => setGoogleUsername(e.target.value)}
+                    className="w-full bg-[#040813] border border-cyan-950 focus:border-cyan-400 rounded-xl py-2.5 ps-9 pe-3 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* كلمة المرور */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  كلمة المرور للحساب <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative flex items-center">
+                  <Lock className="w-4 h-4 text-cyan-400 absolute start-3 pointer-events-none" />
+                  <input
+                    type={showGooglePassword ? 'text' : 'password'}
+                    required
+                    placeholder="اختر كلمة مرور لحسابك (6 أحرف فأكثر)"
+                    value={googlePassword}
+                    onChange={(e) => setGooglePassword(e.target.value)}
+                    className="w-full bg-[#040813] border border-cyan-950 focus:border-cyan-400 rounded-xl py-2.5 ps-9 pe-10 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowGooglePassword(!showGooglePassword)}
+                    className="absolute end-3 text-slate-400 hover:text-cyan-300 p-1 focus:outline-none cursor-pointer"
+                  >
+                    {showGooglePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* زر إتمام التسجيل */}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full mt-2 py-3 px-4 bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-extrabold rounded-xl text-xs sm:text-sm shadow-lg shadow-cyan-950/80 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+              >
+                {loading ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>إتمام إنشاء الحساب والدخول</span>
+                  </>
+                )}
+              </button>
+            </form>
           </div>
-          <h2 className="text-lg sm:text-xl font-black text-slate-100">
-            {mode === 'login' ? t('loginTitle', 'تسجيل الدخول') : t('signupTitle', 'إنشاء حساب')}
-          </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            {mode === 'login'
-              ? t('loginSubtitle', 'سجل دخولك بالبريد الإلكتروني أو رقم الهاتف الذي سبق التسجيل به')
-              : t('signupSubtitle', 'أنشئ حسابك الجديد بسهولة للبدء في التفاعل والنشر')}
-          </p>
-        </div>
+        )}
+
+        {/* =========================================================================
+            VIEW B: Google Login Step 2 (طلب كلمة المرور الخاصة بالحساب المسجل)
+           ========================================================================= */}
+        {googleStep === 'google_login_password' && (
+          <div className="flex flex-col flex-1 overflow-y-auto pe-1">
+            <button
+              type="button"
+              onClick={() => setGoogleStep('idle')}
+              className="inline-flex items-center gap-1.5 text-xs text-cyan-400 hover:text-cyan-300 mb-3 cursor-pointer self-start"
+            >
+              <ArrowRight className="w-4 h-4 rtl:rotate-0 rotate-180" />
+              <span>العودة للخيارات السابقة</span>
+            </button>
+
+            <div className="text-center mb-5 shrink-0">
+              <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-cyan-400/80 mx-auto mb-2 shadow-lg bg-slate-900">
+                <img
+                  src={
+                    googleProfile?.avatarUrl ||
+                    googleCred?.photoURL ||
+                    'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=200&auto=format&fit=crop&q=80'
+                  }
+                  alt=""
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <h2 className="text-base font-black text-slate-100">
+                مرحباً بك {googleProfile?.username || googleCred?.displayName}!
+              </h2>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-950/50 border border-cyan-500/30 text-cyan-300 text-xs mt-1.5 font-medium">
+                <Mail className="w-3.5 h-3.5" />
+                <span>{googleProfile?.email || googleCred?.email}</span>
+              </div>
+              <p className="text-xs text-slate-400 mt-2">
+                يرجى إدخال كلمة المرور الخاصة بحسابك لإتمام تسجيل الدخول
+              </p>
+            </div>
+
+            <form onSubmit={handleVerifyGoogleLogin} className="space-y-4 flex-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  كلمة مرور الحساب <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative flex items-center">
+                  <Lock className="w-4 h-4 text-cyan-400 absolute start-3 pointer-events-none" />
+                  <input
+                    type={showGoogleVerifyPassword ? 'text' : 'password'}
+                    required
+                    placeholder="أدخل كلمة مرور حسابك"
+                    value={googleVerifyPassword}
+                    onChange={(e) => setGoogleVerifyPassword(e.target.value)}
+                    className="w-full bg-[#040813] border border-cyan-950 focus:border-cyan-400 rounded-xl py-2.5 ps-9 pe-10 text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowGoogleVerifyPassword(!showGoogleVerifyPassword)}
+                    className="absolute end-3 text-slate-400 hover:text-cyan-300 p-1 focus:outline-none cursor-pointer"
+                  >
+                    {showGoogleVerifyPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full mt-2 py-3 px-4 bg-gradient-to-r from-cyan-600 via-cyan-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-extrabold rounded-xl text-xs sm:text-sm shadow-lg shadow-cyan-950/80 transition-all flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+              >
+                {loading ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <LogIn className="w-4 h-4" />
+                    <span>تأكيد تسجيل الدخول</span>
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* =========================================================================
+            VIEW C: Standard Identifier & Password Form + Google Auth Button
+           ========================================================================= */}
+        {googleStep === 'idle' && (
+          <>
+            {/* Header Icon & Title */}
+            <div className="text-center mb-4 shrink-0">
+              <div className="inline-flex p-3 rounded-2xl bg-cyan-950/80 border border-cyan-500/30 text-cyan-400 mb-2 shadow-inner">
+                {mode === 'login' ? (
+                  <LogIn className="w-6 h-6" />
+                ) : (
+                  <UserPlus className="w-6 h-6" />
+                )}
+              </div>
+              <h2 className="text-lg sm:text-xl font-black text-slate-100">
+                {mode === 'login' ? t('loginTitle', 'تسجيل الدخول') : t('signupTitle', 'إنشاء حساب')}
+              </h2>
+              <p className="text-xs text-slate-400 mt-1">
+                {mode === 'login'
+                  ? t('loginSubtitle', 'سجل دخولك بالبريد الإلكتروني أو رقم الهاتف الذي سبق التسجيل به')
+                  : t('signupSubtitle', 'أنشئ حسابك الجديد بسهولة للبدء في التفاعل والنشر')}
+              </p>
+            </div>
 
         {/* Tabs: Sign In / Sign Up */}
         <div className="flex bg-[#040813] p-1 rounded-2xl border border-cyan-950/80 mb-4 shrink-0">
@@ -584,10 +949,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           </div>
 
-          {/* زر تسجيل الدخول بحساب Google */}
+          {/* زر Google الذكي: إنشاء حساب عبر Google أو تسجيل الدخول عبر Google */}
           <button
             type="button"
-            onClick={handleGoogleSignIn}
+            onClick={handleGoogleAuth}
             disabled={loading || googleLoading}
             className="w-full py-2.5 px-4 bg-[#050a14] hover:bg-[#0a1224] border border-cyan-900/60 hover:border-cyan-500/60 text-slate-200 hover:text-white font-bold rounded-xl text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2.5 disabled:opacity-50 cursor-pointer group"
           >
@@ -601,7 +966,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
                   <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
                 </svg>
-                <span>{t('signInWithGoogle', 'تسجيل الدخول بحساب Google')}</span>
+                <span>
+                  {mode === 'signup'
+                    ? 'إنشاء حساب باستخدام Google'
+                    : 'تسجيل الدخول باستخدام Google'}
+                </span>
               </>
             )}
           </button>
@@ -615,7 +984,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <button
                 type="button"
                 onClick={() => setMode('signup')}
-                className="text-cyan-400 font-bold hover:underline"
+                className="text-cyan-400 font-bold hover:underline cursor-pointer"
               >
                 {t('createNewAccount', 'إنشاء حساب جديد')}
               </button>
@@ -626,13 +995,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <button
                 type="button"
                 onClick={() => setMode('login')}
-                className="text-cyan-400 font-bold hover:underline"
+                className="text-cyan-400 font-bold hover:underline cursor-pointer"
               >
                 {t('signInPrompt', 'تسجيل الدخول')}
               </button>
             </p>
           )}
         </div>
+        </>
+      )}
       </div>
     </div>
   );

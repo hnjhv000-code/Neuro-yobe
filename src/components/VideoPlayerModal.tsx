@@ -418,7 +418,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
       return;
     }
     if (isGoogleDrive || !video.allowDownload) {
-      showToast(isGoogleDrive ? 'تم منع التنزيل أوتوماتيكياً لحماية حقوق الناشر على جوجل درايف' : t('downloadNotAllowed'), 'error');
+      showToast(isGoogleDrive ? 'تم منع التنزيل أوتوماتيكياً لحماية حقوق البث والنشر' : t('downloadNotAllowed'), 'error');
       return;
     }
 
@@ -730,22 +730,22 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                     allowFullScreen
                     className="w-full h-full border-0"
                   />
-                  {/* Anti-Popout Protective Overlay for Google Drive:
-                      Prevents clicking the Google Drive "Open in new window" button to conceal direct links */}
+                  {/* Anti-Popout Protective Overlay:
+                      Prevents opening external window to conceal direct stream links */}
                   {isGoogleDrive && (
                     <>
                       <div
                         className="absolute top-0 end-0 h-14 w-16 z-20 cursor-default select-none pointer-events-auto bg-transparent"
-                        title="مشغل محمي - تم حظر فتح أو مشاركة رابط جوجل درايف المباشر"
+                        title="مشغل محمي - تم تفعيل الحماية المشددة للمحتوى"
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          showToast('تم حظر فتح أو مشاركة رابط جوجل درايف المباشر لحماية حقوق الناشر', 'info');
+                          showToast('تم حظر فتح أو مشاركة الرابط المباشر لحماية حقوق البث والنشر', 'info');
                         }}
                       />
                       <div className="absolute top-2.5 end-2.5 z-10 pointer-events-none flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#050a14]/85 backdrop-blur-md border border-cyan-500/40 text-[10px] text-cyan-300 font-bold shadow-lg">
-                        <HardDrive className="w-3 h-3 text-cyan-400" />
-                        <span>Google Drive محمي</span>
+                        <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>بث سحابي محمي</span>
                       </div>
                     </>
                   )}

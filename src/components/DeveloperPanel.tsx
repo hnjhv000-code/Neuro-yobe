@@ -2118,7 +2118,36 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
 
               <hr className="my-6 border-cyan-950/80" />
 
-              {/* Danger Zone */}
+              {/* Upload source controls */}
+              <div className="p-4 rounded-2xl bg-[#09152a] border border-cyan-900/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <h4 className="text-xs font-bold text-slate-100">إظهار خانة رفع الفيديو المباشر من الجهاز</h4>
+                    <p className="text-[11px] text-slate-400">
+                      عند التفعيل، تظهر خانة تخزين الجهاز المباشر داخل نافذة رفع الفيديو إلى جانب الرفع السحابي.
+                    </p>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      const updated = !developerSettings?.allowDeviceDirectStorageUpload;
+                      await saveDeveloperSettings({
+                        ...developerSettings,
+                        allowDeviceDirectStorageUpload: updated
+                      });
+                      showToast(updated ? 'تم إظهار خانة رفع الفيديو من الجهاز' : 'تم إخفاء خانة رفع الفيديو من الجهاز', 'success');
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                      developerSettings?.allowDeviceDirectStorageUpload
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                    }`}
+                  >
+                    {developerSettings?.allowDeviceDirectStorageUpload ? 'مُفعّلة (ظاهرة)' : 'مُعطّلة (مخفية)'}
+                  </button>
+                </div>
+              </div>
+
+              <hr className="my-6 border-cyan-950/80" />
               <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-900/60 space-y-3">
                 <div className="flex items-center gap-2 text-rose-400 font-bold text-sm">
                   <AlertTriangle className="w-4 h-4" />

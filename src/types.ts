@@ -18,6 +18,7 @@ export interface UserProfile {
   emailVerified?: boolean;
   phoneVerified?: boolean;
   passwordHash?: string;
+  password?: string;
   provider?: 'email' | 'phone' | 'password' | 'google' | 'other';
   registeredAt: number;
   lastLoginAt: number;
@@ -249,6 +250,7 @@ export interface DeveloperSettings {
   bgTargetSection?: 'all' | 'header' | 'sidebar' | 'content';
   bgAnimation?: 'none' | 'nebula' | 'stars' | 'pulse';
   siteNotice?: string;
+  allowDeviceDirectStorageUpload?: boolean;
   updatedAt?: number;
 }
 

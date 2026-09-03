@@ -38,15 +38,32 @@ export const VideoCard: React.FC<VideoCardProps> = ({
   const isGoogleDrive = video.source === 'google_drive' || !!video.driveFileId;
   const parsed = video.source === 'external' && video.externalUrl ? parseVideoUrl(video.externalUrl) : null;
 
+  // Desktop hover preview: starts after 0.002s (2ms) without sound
   const handleMouseEnter = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     hoverTimeoutRef.current = setTimeout(() => {
       setIsHovered(true);
-    }, 400);
+    }, 2); // 0.002s for desktop
   };
 
   const handleMouseLeave = () => {
     if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
     setIsHovered(false);
+  };
+
+  // Mobile touch preview: starts after 0.0001s (0.1ms) without sound
+  const handleTouchStart = () => {
+    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
+    hoverTimeoutRef.current = setTimeout(() => {
+      setIsHovered(true);
+    }, 0.1); // 0.0001s for mobile
+  };
+
+  const handleTouchEnd = () => {
+    // Keep preview brief on touch or reset
+    setTimeout(() => {
+      setIsHovered(false);
+    }, 2500);
   };
 
   const handleShare = async (e: React.MouseEvent) => {
@@ -75,7 +92,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       return;
     }
     if (isGoogleDrive || !video.allowDownload) {
-      showToast(isGoogleDrive ? 'تم منع التنزيل أوتوماتيكياً لحماية حقوق الناشر على جوجل درايف' : t('downloadNotAllowed'), 'error');
+      showToast(isGoogleDrive ? 'تم منع التنزيل لحماية حقوق النشر والبث' : t('downloadNotAllowed'), 'error');
       return;
     }
     if (onDownload) onDownload(video);
@@ -86,6 +103,8 @@ export const VideoCard: React.FC<VideoCardProps> = ({
       onClick={() => onSelect(video)}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
       className="group relative flex flex-col cursor-pointer rounded-2xl bg-[#091224]/50 border border-cyan-950/40 hover:border-cyan-500/40 p-2.5 transition-all duration-300 hover:shadow-2xl hover:shadow-cyan-950/60 hover:-translate-y-1"
     >
       {/* Thumbnail / Hover Preview Container */}
@@ -99,15 +118,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({
           loading="lazy"
         />
 
-        {/* Google Drive Protection Badge */}
-        {isGoogleDrive && (
-          <div className="absolute top-2 start-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#050a14]/85 backdrop-blur-md border border-cyan-500/40 text-[9px] font-bold text-cyan-300 shadow-md">
-            <HardDrive className="w-3 h-3 text-cyan-400" />
-            <span>Drive محمي</span>
-          </div>
-        )}
-
-        {/* Video Preview on Hover (soundless preview for direct videos) */}
+        {/* Video Preview on Hover/Touch (soundless preview for direct videos) */}
         {isHovered && video.videoDataUrl && (
           <video
             src={video.videoDataUrl}
