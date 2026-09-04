@@ -95,7 +95,7 @@ export async function ensureGsiLoaded(): Promise<void> {
         }
       }, 50);
     };
-    script.onerror = () => reject(new Error('فشل تحميل مكتبة تفويض جوجل درايف'));
+    script.onerror = () => reject(new Error('فشل تحميل مكتبة الربط السحابي'));
     document.head.appendChild(script);
   });
 }
@@ -240,7 +240,7 @@ export async function uploadVideoToGoogleDrive({
       percent: 2,
       loadedBytes: 0,
       totalBytes: file.size,
-      stage: 'طلب موافقة وتفويض جوجل درايف من الناشر...'
+      stage: 'جاري تأمين الاتصال والترخيص بالخادم السحابي...'
     });
     token = await requestDriveAuthorization();
   }
@@ -249,24 +249,24 @@ export async function uploadVideoToGoogleDrive({
     percent: 5,
     loadedBytes: 0,
     totalBytes: file.size,
-    stage: 'جاري تهيئة جلسة الرفع الآمن إلى جوجل درايف...'
+    stage: 'جاري تهيئة جلسة الرفع السحابي فائق السرعة...'
   });
 
   // 2. Prepare file metadata with download & copy restrictions PRE-CONFIGURED
   const extMatch = file.name.match(/\.[a-zA-Z0-9]+$/);
   const fileExt = extMatch ? extMatch[0] : '.mp4';
   const cleanTitle = title.trim().replace(/[<>:"/\\|?*]/g, '');
-  const driveFileName = `[NeuroYobe] ${cleanTitle}${fileExt}`;
+  const driveFileName = `${cleanTitle}${fileExt}`;
 
   const metadata = {
     name: driveFileName,
-    description: description ? `${description}\n\n(تم الرفع عبر منصة NeuroYobe)` : 'تم الرفع عبر منصة NeuroYobe',
+    description: description || '',
     mimeType: file.type || 'video/mp4',
     // CRITICAL: Block downloading, copying, and printing for viewers
     copyRequiresWriterPermission: true,
     viewersCanCopyContent: false,
     properties: {
-      uploadedVia: 'NeuroYobe',
+      uploadedVia: 'CloudSecure',
       publisherUid,
       publisherName,
       uploadTimestamp: Date.now().toString()
@@ -293,12 +293,12 @@ export async function uploadVideoToGoogleDrive({
       token = await requestDriveAuthorization(true);
       return uploadVideoToGoogleDrive({ file, title, description, publisherUid, publisherName, onProgress });
     }
-    throw new Error(`تعذر بدء الرفع إلى جوجل درايف (${initResponse.status}): ${errText}`);
+    throw new Error(`تعذر بدء الرفع إلى الخادم السحابي (${initResponse.status}): ${errText}`);
   }
 
   const uploadUrl = initResponse.headers.get('Location');
   if (!uploadUrl) {
-    throw new Error('لم يقدم خادم جوجل درايف رابط جلسة الرفع المستأنف');
+    throw new Error('تعذر الحصول على رابط جلسة الرفع السحابي');
   }
 
   // 4. Perform upload with XMLHttpRequest to monitor progress
@@ -314,7 +314,7 @@ export async function uploadVideoToGoogleDrive({
           percent,
           loadedBytes: evt.loaded,
           totalBytes: evt.total,
-          stage: `جاري رفع الفيديو إلى جوجل درايف الخاص بك (${percent}%)...`
+          stage: `جاري رفع الفيديو إلى السيرفر السحابي (${percent}%)...`
         });
       }
     };
@@ -325,15 +325,15 @@ export async function uploadVideoToGoogleDrive({
           const parsed = JSON.parse(xhr.responseText);
           resolve(parsed);
         } catch {
-          reject(new Error('استجابة غير متوقعة من خادم جوجل درايف بعد الرفع'));
+          reject(new Error('استجابة غير متوقعة من السيرفر السحابي بعد الرفع'));
         }
       } else {
-        reject(new Error(`فشل رفع ملف الفيديو إلى جوجل درايف (رمز الخطأ: ${xhr.status})`));
+        reject(new Error(`فشل رفع ملف الفيديو إلى السيرفر السحابي (رمز الخطأ: ${xhr.status})`));
       }
     };
 
-    xhr.onerror = () => reject(new Error('انقطع الاتصال بخادم جوجل درايف أثناء الرفع'));
-    xhr.ontimeout = () => reject(new Error('انتهت مهلة الاتصال أثناء رفع الفيديو إلى جوجل درايف'));
+    xhr.onerror = () => reject(new Error('انقطع الاتصال بالسيرفر السحابي أثناء الرفع'));
+    xhr.ontimeout = () => reject(new Error('انتهت مهلة الاتصال أثناء رفع الفيديو إلى السيرفر السحابي'));
 
     xhr.send(file);
   });
@@ -390,7 +390,7 @@ export async function uploadVideoToGoogleDrive({
     percent: 100,
     loadedBytes: file.size,
     totalBytes: file.size,
-    stage: 'تم الرفع إلى جوجل درايف بنجاح مع تفعيل حماية منع التنزيل!'
+    stage: 'تم الرفع السحابي بنجاح مع تفعيل حماية منع التنزيل!'
   });
 
   const embedUrl = getDriveEmbedUrl(fileId);

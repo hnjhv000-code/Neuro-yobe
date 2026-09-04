@@ -19,6 +19,9 @@ import { NotificationDetailModal } from './components/NotificationDetailModal';
 import { AboutUsView } from './components/AboutUsView';
 import { PrivacyView } from './components/PrivacyView';
 import { ToastProvider, useToast } from './components/Toast';
+import { AlgorithmicFeed } from './components/AlgorithmicFeed';
+import { CosmicSiteNotice } from './components/CosmicSiteNotice';
+import { buildAlgorithmicFeed } from './services/feedAlgorithms';
 
 import {
   auth,
@@ -215,6 +218,7 @@ export const AppContent: React.FC = () => {
   const [showCreatePostModal, setShowCreatePostModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showDeveloperPanel, setShowDeveloperPanel] = useState(false);
+  const [isDevAuthenticated, setIsDevAuthenticated] = useState<boolean>(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [showPlaylistsModal, setShowPlaylistsModal] = useState(false);
   const [selectedNotificationForDetail, setSelectedNotificationForDetail] = useState<NotificationItem | null>(null);
@@ -464,6 +468,16 @@ export const AppContent: React.FC = () => {
     .map((d) => allVideos.find((v) => v.id === d.videoId))
     .filter((v): v is VideoItem => Boolean(v));
 
+  // Smart Algorithmic Feed: 3 Long Videos -> 4 Shorts (2x2) -> 1 Subscribed Post -> Repeat
+  const algorithmicFeedBlocks = React.useMemo(() => {
+    return buildAlgorithmicFeed({
+      videos: filteredVideos,
+      posts: allPosts,
+      subscriptions,
+      currentUser
+    });
+  }, [filteredVideos, allPosts, subscriptions, currentUser]);
+
   // Background style based on Developer Settings
   const bgStyle: React.CSSProperties = developerSettings?.customBgUrl
     ? {
@@ -495,13 +509,8 @@ export const AppContent: React.FC = () => {
       } ${developerSettings?.bgAnimation === 'nebula' && isDarkTheme ? 'nebula-bg' : ''}`}
       style={bgStyle}
     >
-      {/* Top Global Notice / Announcement if configured by Developer */}
-      {developerSettings?.siteNotice && (
-        <div className="bg-gradient-to-r from-cyan-900/90 via-blue-900/90 to-indigo-900/90 border-b border-cyan-500/40 text-cyan-100 px-4 py-2 text-xs text-center flex items-center justify-center gap-2 font-semibold shadow-md">
-          <Megaphone className="w-4 h-4 text-cyan-300 animate-pulse shrink-0" />
-          <span>{developerSettings.siteNotice}</span>
-        </div>
-      )}
+      {/* Top Global Notice / Announcement with custom animations, image, and dismiss X button */}
+      <CosmicSiteNotice settings={developerSettings || undefined} />
 
       {/* Main Cosmic Navbar */}
       <Navbar
@@ -589,54 +598,14 @@ export const AppContent: React.FC = () => {
                 ))}
               </div>
 
-              {/* Shorts Highlights Horizontal Carousel */}
-              {shortsVideos.length > 0 && selectedCategory === 'all' && (
-                <div className="space-y-3 pt-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Compass className="w-5 h-5 text-rose-500" />
-                      <h2 className="text-base font-extrabold text-slate-100">شورتس (Shorts)</h2>
-                    </div>
-                    <button
-                      onClick={() => setCurrentRoute('shorts')}
-                      className="text-xs text-cyan-400 hover:underline font-bold"
-                    >
-                      عرض الكل
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                    {shortsVideos.slice(0, 6).map((short) => (
-                      <div
-                        key={short.id}
-                        onClick={() => handleOpenVideo(short)}
-                        className="group relative aspect-[9/16] rounded-2xl overflow-hidden bg-slate-900 border border-cyan-950/60 hover:border-rose-500/60 cursor-pointer shadow-lg transition-all hover:scale-105"
-                      >
-                        <img
-                          src={short.thumbnailDataUrl}
-                          alt={short.title}
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent p-3 flex flex-col justify-end">
-                          <span className="text-xs font-bold text-white line-clamp-2 leading-snug">
-                            {short.title}
-                          </span>
-                          <span className="text-[10px] text-cyan-300 mt-1">
-                            {short.views || 0} {t('views')}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Standard Long Videos Grid */}
+              {/* Algorithmic Content Feed (3 Long Videos -> 4 Shorts in 2x2 -> 1 Subscribed Post -> Repeat) */}
               <div className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Film className="w-5 h-5 text-cyan-400" />
-                    <h2 className="text-base font-extrabold text-slate-100">فيديوهات مقترحة</h2>
+                    <h2 className="text-base font-extrabold text-slate-100">
+                      {searchQuery.trim() ? `نتائج البحث عن "${searchQuery}"` : 'المحتوى المقترح وخوارزميات الخلاصة'}
+                    </h2>
                   </div>
                   <span className="text-xs text-slate-400 font-semibold">{filteredVideos.length} فيديو</span>
                 </div>
@@ -659,29 +628,25 @@ export const AppContent: React.FC = () => {
                     </button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                    {filteredVideos.map((video) => (
-                      <VideoCard
-                        key={video.id}
-                        video={video}
-                        language={language}
-                        currentUser={currentUser}
-                        onSelect={(v) => handleOpenVideo(v)}
-                        onSaveToWatchLater={() => {
-                          showToast(t('savedSuccess'), 'success');
-                        }}
-                        onAddToPlaylist={(v) => {
-                          setPlaylistVideoToAdd(v);
-                          setShowPlaylistsModal(true);
-                        }}
-                        onDownload={(v) => {
-                          showToast(t('downloadSuccess'), 'info');
-                        }}
-                        onOpenAuth={() => setShowAuthModal(true)}
-                        onSelectChannel={handleSelectChannel}
-                      />
-                    ))}
-                  </div>
+                  <AlgorithmicFeed
+                    blocks={algorithmicFeedBlocks}
+                    language={language}
+                    currentUser={currentUser}
+                    onSelectVideo={(v) => handleOpenVideo(v)}
+                    onSaveToWatchLater={() => {
+                      showToast(t('savedSuccess'), 'success');
+                    }}
+                    onAddToPlaylist={(v) => {
+                      setPlaylistVideoToAdd(v);
+                      setShowPlaylistsModal(true);
+                    }}
+                    onDownload={(v) => {
+                      showToast(t('downloadSuccess'), 'info');
+                    }}
+                    onOpenAuth={() => setShowAuthModal(true)}
+                    onSelectChannel={handleSelectChannel}
+                    t={t}
+                  />
                 )}
               </div>
             </div>
@@ -1283,6 +1248,8 @@ export const AppContent: React.FC = () => {
         <DeveloperPanel
           onClose={() => setShowDeveloperPanel(false)}
           developerSettings={developerSettings}
+          isAuthenticated={isDevAuthenticated}
+          onAuthenticate={setIsDevAuthenticated}
           onSelectVideo={(v) => {
             setShowDeveloperPanel(false);
             handleOpenVideo(v);

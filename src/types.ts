@@ -64,6 +64,11 @@ export interface VideoItem {
   watchTimeSeconds?: number;
   watchHours?: number;
   likedUsers?: Record<string, 'like' | 'dislike'>;
+  // Ad Analytics & Breakdown
+  preRollAdsCount?: number;
+  bannerAdsCount?: number;
+  shortsAdsCount?: number;
+  adWatchDurationSeconds?: number;
 }
 
 export interface CommentItem {
@@ -250,6 +255,8 @@ export interface DeveloperSettings {
   bgTargetSection?: 'all' | 'header' | 'sidebar' | 'content';
   bgAnimation?: 'none' | 'nebula' | 'stars' | 'pulse';
   siteNotice?: string;
+  siteNoticeImageUrl?: string;
+  siteNoticeAnimation?: 'cosmic-pulse' | 'neon-glow' | 'floating' | 'gradient-wave' | 'shimmer' | 'bounce-soft' | 'aurora';
   allowDeviceDirectStorageUpload?: boolean;
   updatedAt?: number;
 }

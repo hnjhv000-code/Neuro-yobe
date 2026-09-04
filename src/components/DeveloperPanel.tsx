@@ -40,9 +40,12 @@ import {
   Copy,
   Check,
   MapPin,
-  Tablet
+  Tablet,
+  Megaphone
 } from 'lucide-react';
 import { CosmicLogo } from './CosmicLogo';
+import { CosmicSiteNotice } from './CosmicSiteNotice';
+import { DevTabSearchBar } from './DevTabSearchBar';
 import { compressDeviceImage } from '../services/mediaStorage';
 import {
   subscribeToAllUsers,
@@ -77,7 +80,9 @@ import {
   deletePostWithReason,
   subscribeToBlacklist,
   toggleUserBlacklist,
-  deleteBlacklistRecord
+  deleteBlacklistRecord,
+  clearAllActivityLogs,
+  clearAllPlatformAdStats
 } from '../services/firebase';
 import { parseVideoUrl } from '../services/embedHelper';
 import { useToast } from './Toast';
@@ -99,6 +104,8 @@ interface DeveloperPanelProps {
   onClose: () => void;
   developerSettings: DeveloperSettings | null;
   onSelectVideo: (video: VideoItem) => void;
+  isAuthenticated?: boolean;
+  onAuthenticate?: (authenticated: boolean) => void;
 }
 
 type TabType =
@@ -121,12 +128,42 @@ type TabType =
 export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
   onClose,
   developerSettings,
-  onSelectVideo
+  onSelectVideo,
+  isAuthenticated: propIsAuthenticated = false,
+  onAuthenticate
 }) => {
-  // Authentication State
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // Authentication State (persists during page session across modal toggles)
+  const [isAuthenticated, setIsAuthenticated] = useState(propIsAuthenticated);
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState('');
+
+  useEffect(() => {
+    setIsAuthenticated(propIsAuthenticated);
+  }, [propIsAuthenticated]);
+
+  // Tab-specific Search States (dedicated advanced search in EVERY tab)
+  const [tabSearches, setTabSearches] = useState<Record<string, string>>({
+    visitors: '',
+    complaints: '',
+    blacklist: '',
+    analytics: '',
+    users: '',
+    content: '',
+    videos: '',
+    search: '',
+    support: '',
+    background: '',
+    logo: '',
+    subscriptions: '',
+    posts: '',
+    activity: '',
+    settings: ''
+  });
+
+  const getTabSearch = (tab: string) => tabSearches[tab] || '';
+  const setTabSearch = (tab: string, val: string) => {
+    setTabSearches(prev => ({ ...prev, [tab]: val }));
+  };
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<TabType>('visitors');
@@ -177,8 +214,22 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
   // Logo Control State
   const [customLogoDataUrl, setCustomLogoDataUrl] = useState<string | null>(null);
 
-  // Global Notice State
+  // Global Notice State with professional animations & single image attachment
   const [siteNotice, setSiteNotice] = useState(developerSettings?.siteNotice || '');
+  const [siteNoticeAnimation, setSiteNoticeAnimation] = useState<'cosmic-pulse' | 'neon-glow' | 'floating' | 'gradient-wave' | 'shimmer' | 'bounce-soft' | 'aurora'>(
+    developerSettings?.siteNoticeAnimation || 'cosmic-pulse'
+  );
+  const [siteNoticeImageUrl, setSiteNoticeImageUrl] = useState<string | null>(
+    developerSettings?.siteNoticeImageUrl || null
+  );
+
+  useEffect(() => {
+    if (developerSettings) {
+      if (developerSettings.siteNotice !== undefined) setSiteNotice(developerSettings.siteNotice);
+      if (developerSettings.siteNoticeAnimation) setSiteNoticeAnimation(developerSettings.siteNoticeAnimation);
+      if (developerSettings.siteNoticeImageUrl !== undefined) setSiteNoticeImageUrl(developerSettings.siteNoticeImageUrl || null);
+    }
+  }, [developerSettings]);
 
   const { showToast } = useToast();
 
@@ -216,6 +267,9 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
     e.preventDefault();
     if (passwordInput === 'Yassa 20') {
       setIsAuthenticated(true);
+      if (onAuthenticate) {
+        onAuthenticate(true);
+      }
       setAuthError('');
       showToast('مرحباً بك في لوحة تحكم المطور NeuroYobe', 'success');
     } else {
@@ -293,6 +347,19 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
     });
     setCustomLogoDataUrl(null);
     showToast('تمت استعادة اللوجو الافتراضي الأصلي', 'info');
+  };
+
+  const handleNoticeImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      showToast('جاري معالجة صورة التنبيه من الجهاز...', 'info');
+      const dataUrl = await compressDeviceImage(file, 1024, 768, 0.8);
+      setSiteNoticeImageUrl(dataUrl);
+      showToast('تم إرفاق صورة التنبيه بنجاح', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'فشل تحميل صورة التنبيه', 'error');
+    }
   };
 
   // --- Visitors & Reset Actions ---
@@ -607,6 +674,19 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              if (onAuthenticate) onAuthenticate(false);
+              setIsAuthenticated(false);
+              showToast('تم قفل لوحة المطور. ستحتاج لكلمة المرور للدخول مجدداً.', 'info');
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-950/70 hover:bg-rose-900/90 border border-rose-800 text-xs font-bold text-rose-300 transition-colors"
+            title="قفل لوحة المطور"
+          >
+            <Lock className="w-3.5 h-3.5" />
+            <span>قفل الجلسة</span>
+          </button>
+
           <button
             onClick={onClose}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 transition-colors"
@@ -1287,15 +1367,45 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
                 </div>
               </div>
 
-              {/* Complaints List */}
-              <div className="space-y-3">
-                {complaints
+              {/* Advanced Search in Complaints */}
+              {(() => {
+                const q = getTabSearch('complaints').toLowerCase().trim();
+                const filteredComplaints = complaints
                   .filter(c => complaintFilter === 'all' || c.status === complaintFilter)
-                  .map((comp) => (
-                    <div
-                      key={comp.id}
-                      className="p-4 rounded-2xl bg-[#091224] border border-cyan-950 space-y-3.5 shadow-md"
-                    >
+                  .filter(c => {
+                    if (!q) return true;
+                    return (
+                      (c.reporterName || '').toLowerCase().includes(q) ||
+                      (c.reporterEmail || '').toLowerCase().includes(q) ||
+                      (c.videoTitle || '').toLowerCase().includes(q) ||
+                      (c.reason || '').toLowerCase().includes(q) ||
+                      (c.details || '').toLowerCase().includes(q) ||
+                      (c.videoId || '').toLowerCase().includes(q)
+                    );
+                  });
+
+                return (
+                  <>
+                    <DevTabSearchBar
+                      value={getTabSearch('complaints')}
+                      onChange={(v) => setTabSearch('complaints', v)}
+                      placeholder="ابحث في الشكاوى باسم المبلغ، البريد، عنوان الفيديو، السبب، أو تفاصيل البلاغ..."
+                      totalCount={complaints.length}
+                      filteredCount={filteredComplaints.length}
+                    />
+
+                    {/* Complaints List */}
+                    <div className="space-y-3">
+                      {filteredComplaints.length === 0 ? (
+                        <div className="p-8 text-center rounded-2xl bg-[#091224] border border-cyan-950 text-slate-500 text-xs">
+                          {q ? 'لا توجد نتائج مطابقة لبحثك في الشكاوى.' : 'لا توجد شكاوى أو بلاغات مسجلة في هذا القسم.'}
+                        </div>
+                      ) : (
+                        filteredComplaints.map((comp) => (
+                          <div
+                            key={comp.id}
+                            className="p-4 rounded-2xl bg-[#091224] border border-cyan-950 space-y-3.5 shadow-md"
+                          >
                       <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-cyan-950/80">
                         <div className="flex items-center gap-2">
                           <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
@@ -1375,16 +1485,14 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
                         </button>
                       </div>
                     </div>
-                  ))}
-
-                {complaints.length === 0 && (
-                  <div className="p-12 text-center rounded-2xl bg-[#091224] border border-cyan-950 text-slate-500 text-xs">
-                    لا توجد بلاغات أو شكاوى مخالفات واردة حالياً
-                  </div>
+                  ))
                 )}
-              </div>
-            </div>
-          )}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
 
           {/* TAB: القائمة السوداء ومنع النشر (Blacklist) */}
           {activeTab === 'blacklist' && (
@@ -1448,16 +1556,39 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
                 </form>
               </div>
 
-              {/* Blacklisted Users List */}
-              <div className="space-y-3">
-                <h3 className="text-xs font-bold text-slate-300 px-1">المستخدمون المحظورون حالياً ({blacklist.length}):</h3>
+              {/* Blacklisted Users List with Advanced Search */}
+              {(() => {
+                const q = getTabSearch('blacklist').toLowerCase().trim();
+                const filteredBlacklist = blacklist.filter((item) => {
+                  if (!q) return true;
+                  return (
+                    (item.userName || '').toLowerCase().includes(q) ||
+                    (item.email || '').toLowerCase().includes(q) ||
+                    (item.userUid || '').toLowerCase().includes(q) ||
+                    (item.reason || '').toLowerCase().includes(q)
+                  );
+                });
 
-                {blacklist.length === 0 ? (
-                  <div className="p-12 text-center rounded-2xl bg-[#091224] border border-cyan-950 text-slate-500 text-xs">
-                    القائمة السوداء فارغة حالياً. لا يوجد مستخدمون محظورون.
-                  </div>
-                ) : (
-                  blacklist.map((item) => (
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold text-slate-300 px-1">المستخدمون المحظورون حالياً ({blacklist.length}):</h3>
+                    </div>
+
+                    <DevTabSearchBar
+                      value={getTabSearch('blacklist')}
+                      onChange={(v) => setTabSearch('blacklist', v)}
+                      placeholder="ابحث في القائمة السوداء بالاسم، البريد، المعرف UID، أو سبب الحظر..."
+                      totalCount={blacklist.length}
+                      filteredCount={filteredBlacklist.length}
+                    />
+
+                    {filteredBlacklist.length === 0 ? (
+                      <div className="p-12 text-center rounded-2xl bg-[#091224] border border-cyan-950 text-slate-500 text-xs">
+                        {q ? 'لا توجد نتائج مطابقة لبحثك في القائمة السوداء.' : 'القائمة السوداء فارغة حالياً. لا يوجد مستخدمون محظورون.'}
+                      </div>
+                    ) : (
+                      filteredBlacklist.map((item) => (
                     <div
                       key={item.userUid}
                       className="p-4 rounded-2xl bg-[#091224] border border-rose-950/80 space-y-3 shadow"
@@ -1524,6 +1655,8 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
                   ))
                 )}
               </div>
+            );
+          })()}
 
               {/* Users with Warning Strikes (1 or 2 strikes) */}
               <div className="space-y-3 pt-4 border-t border-cyan-950">
@@ -1555,128 +1688,245 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
           )}
 
           {/* TAB 1: الإحصائيات (Analytics) */}
-          {activeTab === 'analytics' && (
-            <div className="space-y-6">
-              <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 text-cyan-400" />
-                <span>إحصائيات المنصة الحقيقية</span>
-              </h2>
+          {activeTab === 'analytics' && (() => {
+            const q = getTabSearch('analytics').toLowerCase().trim();
+            const allStats = [
+              { label: 'إجمالي المستخدمين', value: users.length, color: 'text-cyan-300' },
+              { label: 'إجمالي الفيديوهات', value: videos.length, color: 'text-sky-300' },
+              { label: 'إجمالي Shorts', value: totalShorts, color: 'text-rose-300' },
+              { label: 'إجمالي الفيديوهات الطويلة', value: totalLongVideos, color: 'text-indigo-300' },
+              { label: 'إجمالي المشاهدات', value: totalViews, color: 'text-emerald-300' },
+              { label: 'إجمالي الإعجابات', value: totalLikes, color: 'text-amber-300' },
+              { label: 'إجمالي التعليقات', value: totalComments, color: 'text-purple-300' },
+              { label: 'إجمالي التنزيلات', value: totalDownloads, color: 'text-teal-300' },
+              { label: 'إجمالي الاشتراكات', value: subscriptions.length, color: 'text-blue-300' },
+              { label: 'الشكاوى والتذاكر', value: tickets.length, color: 'text-orange-300' },
+            ];
 
-              {/* Metric Cards Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-                {[
-                  { label: 'إجمالي المستخدمين', value: users.length, color: 'text-cyan-300' },
-                  { label: 'إجمالي الفيديوهات', value: videos.length, color: 'text-sky-300' },
-                  { label: 'إجمالي Shorts', value: totalShorts, color: 'text-rose-300' },
-                  { label: 'إجمالي الفيديوهات الطويلة', value: totalLongVideos, color: 'text-indigo-300' },
-                  { label: 'إجمالي المشاهدات', value: totalViews, color: 'text-emerald-300' },
-                  { label: 'إجمالي الإعجابات', value: totalLikes, color: 'text-amber-300' },
-                  { label: 'إجمالي التعليقات', value: totalComments, color: 'text-purple-300' },
-                  { label: 'إجمالي التنزيلات', value: totalDownloads, color: 'text-teal-300' },
-                  { label: 'إجمالي الاشتراكات', value: subscriptions.length, color: 'text-blue-300' },
-                  { label: 'الشكاوى والتذاكر', value: tickets.length, color: 'text-orange-300' },
-                ].map((stat, idx) => (
-                  <div key={idx} className="p-4 rounded-2xl bg-[#091224] border border-cyan-950/80 shadow-md">
-                    <span className="text-xs text-slate-400">{stat.label}</span>
-                    <p className={`text-2xl font-black mt-1 ${stat.color}`}>{stat.value}</p>
-                  </div>
-                ))}
-              </div>
+            const filteredStats = allStats.filter(s =>
+              !q || s.label.toLowerCase().includes(q) || String(s.value).includes(q)
+            );
 
-              {/* Highest Viewed Videos */}
-              <div className="p-5 rounded-2xl bg-[#091224] border border-cyan-950">
-                <h3 className="text-sm font-bold text-slate-200 mb-3">أعلى الفيديوهات مشاهدة على المنصة</h3>
-                <div className="divide-y divide-cyan-950/60">
-                  {sortedVideosByViews.slice(0, 5).map((v, i) => (
-                    <div key={v.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
-                      <div className="flex items-center gap-3">
-                        <span className="font-mono font-bold text-cyan-400 w-4">#{i + 1}</span>
-                        <img src={v.thumbnailDataUrl} alt="" className="w-12 h-7 rounded object-cover bg-slate-900" />
-                        <div>
-                          <p className="font-bold text-slate-200">{v.title}</p>
-                          <span className="text-[11px] text-slate-400">{v.publisherName}</span>
-                        </div>
-                      </div>
-                      <span className="font-bold text-cyan-300">{v.views || 0} مشاهدة</span>
+            const filteredTopVideos = sortedVideosByViews.filter(v =>
+              !q ||
+              v.title.toLowerCase().includes(q) ||
+              v.publisherName.toLowerCase().includes(q)
+            );
+
+            return (
+              <div className="space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-cyan-400" />
+                    <span>إحصائيات المنصة الحقيقية</span>
+                  </h2>
+                </div>
+
+                <DevTabSearchBar
+                  value={getTabSearch('analytics')}
+                  onChange={(v) => setTabSearch('analytics', v)}
+                  placeholder="ابحث في الإحصائيات، المقاييس، أو الفيديوهات الأكثر مشاهدة..."
+                  totalCount={allStats.length}
+                  filteredCount={filteredStats.length}
+                />
+
+                {/* Metric Cards Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+                  {filteredStats.map((stat, idx) => (
+                    <div key={idx} className="p-4 rounded-2xl bg-[#091224] border border-cyan-950/80 shadow-md">
+                      <span className="text-xs text-slate-400">{stat.label}</span>
+                      <p className={`text-2xl font-black mt-1 ${stat.color}`}>{stat.value}</p>
                     </div>
                   ))}
                 </div>
-              </div>
-            </div>
-          )}
 
-          {/* TAB 2: المستخدمون (Users) */}
-          {activeTab === 'users' && (
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
-                  <Users className="w-5 h-5 text-cyan-400" />
-                  <span>جميع المستخدمين المسجلين ({users.length})</span>
-                </h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleDeleteAllUsers}
-                    className="px-3 py-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>حذف جميع المستخدمين</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="divide-y divide-cyan-950/60 bg-[#091224] border border-cyan-950 rounded-2xl overflow-hidden">
-                {users.length === 0 ? (
-                  <p className="p-8 text-center text-xs text-slate-500">لا يوجد مستخدمون مسجلون بعد</p>
-                ) : (
-                  users.map((u) => (
-                    <div key={u.uid} className="p-4 flex flex-wrap items-center justify-between gap-4 text-xs">
-                      <div className="flex items-center gap-3 min-w-[200px]">
-                        <img src={u.avatarUrl} alt="" className="w-10 h-10 rounded-full object-cover border border-cyan-900" />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-100">{u.username}</span>
-                            {u.isBlocked && (
-                              <span className="px-2 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-300 text-[10px] font-bold">
-                                محظور
-                              </span>
-                            )}
+                {/* Highest Viewed Videos */}
+                <div className="p-5 rounded-2xl bg-[#091224] border border-cyan-950">
+                  <h3 className="text-sm font-bold text-slate-200 mb-3">أعلى الفيديوهات مشاهدة على المنصة</h3>
+                  <div className="divide-y divide-cyan-950/60">
+                    {filteredTopVideos.slice(0, 8).map((v, i) => (
+                      <div key={v.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-3">
+                          <span className="font-mono font-bold text-cyan-400 w-4">#{i + 1}</span>
+                          <img src={v.thumbnailDataUrl} alt="" className="w-12 h-7 rounded object-cover bg-slate-900" />
+                          <div>
+                            <p className="font-bold text-slate-200">{v.title}</p>
+                            <span className="text-[11px] text-slate-400">{v.publisherName}</span>
                           </div>
-                          <p className="text-slate-400 text-[11px]">{u.email}</p>
-                          <span className="text-[10px] text-cyan-400">{u.deviceType || 'متصفح ويب'}</span>
                         </div>
+                        <span className="font-bold text-cyan-300">{v.views || 0} مشاهدة</span>
                       </div>
+                    ))}
+                  </div>
+                </div>
 
-                      <div className="text-slate-400 text-[11px]">
-                        <span>تاريخ التسجيل: {new Date(u.registeredAt).toLocaleDateString()}</span>
+                {/* Ad Statistics & Monetization Performance */}
+                <div className="p-5 rounded-2xl bg-gradient-to-br from-[#09152b] to-[#0d1f3d] border border-cyan-800/60 shadow-xl space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-cyan-900/60">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 rounded-xl bg-amber-500/20 border border-amber-400/40 text-amber-300">
+                        <Sparkles className="w-5 h-5" />
                       </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleToggleBlockUser(u)}
-                          className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 transition-colors ${
-                            u.isBlocked
-                              ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800'
-                              : 'bg-amber-950 hover:bg-amber-900 text-amber-300 border border-amber-800'
-                          }`}
-                        >
-                          <Ban className="w-3.5 h-3.5" />
-                          <span>{u.isBlocked ? 'إلغاء الحظر' : 'حظر الحساب'}</span>
-                        </button>
-
-                        <button
-                          onClick={() => handleDeleteUser(u.uid)}
-                          className="p-2 rounded-xl bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 transition-colors"
-                          title="حذف المستخدم وجميع بياناته"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                      <div>
+                        <h3 className="text-sm font-black text-slate-100 flex items-center gap-2">
+                          <span>إحصائيات ظهور الإعلانات (Ad Impressions & Stats)</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-950 text-amber-300 border border-amber-700/60">
+                            AdSense & Platform
+                          </span>
+                        </h3>
+                        <p className="text-[11px] text-slate-400">
+                          تتبع حقيقي لإعلانات البداية (Pre-roll)، البنرات، وفواصل الفيديوهات القصيرة (Shorts)
+                        </p>
                       </div>
                     </div>
-                  ))
-                )}
+
+                    <button
+                      onClick={async () => {
+                        if (window.confirm('هل أنت متأكد من تصفير وحذف جميع إحصائيات الإعلانات المسجلة لكافة الفيديوهات؟')) {
+                          await clearAllPlatformAdStats();
+                          showToast('تم تصفير جميع إحصائيات الإعلانات بنجاح', 'success');
+                        }
+                      }}
+                      className="px-3.5 py-2 bg-rose-950/80 hover:bg-rose-900 border border-rose-700/80 text-rose-200 rounded-xl text-xs font-bold transition-all shadow flex items-center gap-1.5 active:scale-95"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>تصفير إحصائيات الإعلانات</span>
+                    </button>
+                  </div>
+
+                  {(() => {
+                    const totalPreRoll = videos.reduce((acc, v) => acc + (v.preRollAdsCount || 0), 0);
+                    const totalBanners = videos.reduce((acc, v) => acc + (v.bannerAdsCount || 0), 0);
+                    const totalShortsAds = videos.reduce((acc, v) => acc + (v.shortsAdsCount || 0), 0);
+                    const totalWatchSec = videos.reduce((acc, v) => acc + (v.adWatchDurationSeconds || 0), 0);
+                    const totalImpressions = totalPreRoll + totalBanners + totalShortsAds;
+                    const totalWatchMinutes = Math.round(totalWatchSec / 60);
+
+                    return (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="p-3.5 rounded-xl bg-slate-900/80 border border-cyan-900/60">
+                          <span className="text-[11px] text-slate-400 block">إجمالي مرات الظهور</span>
+                          <span className="text-xl font-black text-amber-300 mt-1 block">{totalImpressions.toLocaleString()}</span>
+                          <span className="text-[10px] text-slate-500">مجموع كافة الإعلانات</span>
+                        </div>
+                        <div className="p-3.5 rounded-xl bg-slate-900/80 border border-cyan-900/60">
+                          <span className="text-[11px] text-slate-400 block">إعلانات البداية (Pre-Roll)</span>
+                          <span className="text-xl font-black text-cyan-300 mt-1 block">{totalPreRoll.toLocaleString()}</span>
+                          <span className="text-[10px] text-slate-500">قبل تشغيل الفيديو الطويل</span>
+                        </div>
+                        <div className="p-3.5 rounded-xl bg-slate-900/80 border border-cyan-900/60">
+                          <span className="text-[11px] text-slate-400 block">فواصل الشورتس (Shorts Ads)</span>
+                          <span className="text-xl font-black text-rose-300 mt-1 block">{totalShortsAds.toLocaleString()}</span>
+                          <span className="text-[10px] text-slate-500">كل 10 فيديوهات شورت</span>
+                        </div>
+                        <div className="p-3.5 rounded-xl bg-slate-900/80 border border-cyan-900/60">
+                          <span className="text-[11px] text-slate-400 block">وقت مشاهدة الإعلانات</span>
+                          <span className="text-xl font-black text-emerald-300 mt-1 block">{totalWatchMinutes} دقيقة</span>
+                          <span className="text-[10px] text-slate-500">({totalWatchSec} ثانية)</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
+
+          {/* TAB 2: المستخدمون (Users) */}
+          {activeTab === 'users' && (() => {
+            const q = getTabSearch('users').toLowerCase().trim();
+            const filteredUsers = users.filter((u) => {
+              if (!q) return true;
+              return (
+                (u.username || '').toLowerCase().includes(q) ||
+                (u.email || '').toLowerCase().includes(q) ||
+                (u.uid || '').toLowerCase().includes(q) ||
+                (u.deviceType || '').toLowerCase().includes(q)
+              );
+            });
+
+            return (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
+                    <Users className="w-5 h-5 text-cyan-400" />
+                    <span>جميع المستخدمين المسجلين ({users.length})</span>
+                  </h2>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleDeleteAllUsers}
+                      className="px-3 py-1.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>حذف جميع المستخدمين</span>
+                    </button>
+                  </div>
+                </div>
+
+                <DevTabSearchBar
+                  value={getTabSearch('users')}
+                  onChange={(v) => setTabSearch('users', v)}
+                  placeholder="ابحث في المستخدمين بالاسم، البريد الإلكتروني، المعرف UID، أو نوع الجهاز..."
+                  totalCount={users.length}
+                  filteredCount={filteredUsers.length}
+                />
+
+                <div className="divide-y divide-cyan-950/60 bg-[#091224] border border-cyan-950 rounded-2xl overflow-hidden">
+                  {filteredUsers.length === 0 ? (
+                    <p className="p-8 text-center text-xs text-slate-500">
+                      {q ? 'لا يوجد مستخدمون مطابقون لبحثك.' : 'لا يوجد مستخدمون مسجلون بعد'}
+                    </p>
+                  ) : (
+                    filteredUsers.map((u) => (
+                      <div key={u.uid} className="p-4 flex flex-wrap items-center justify-between gap-4 text-xs">
+                        <div className="flex items-center gap-3 min-w-[200px]">
+                          <img src={u.avatarUrl} alt="" className="w-10 h-10 rounded-full object-cover border border-cyan-900" />
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-100">{u.username}</span>
+                              {u.isBlocked && (
+                                <span className="px-2 py-0.5 rounded bg-rose-950 border border-rose-800 text-rose-300 text-[10px] font-bold">
+                                  محظور
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-slate-400 text-[11px]">{u.email}</p>
+                            <span className="text-[10px] text-cyan-400">{u.deviceType || 'متصفح ويب'}</span>
+                          </div>
+                        </div>
+
+                        <div className="text-slate-400 text-[11px]">
+                          <span>تاريخ التسجيل: {new Date(u.registeredAt).toLocaleDateString()}</span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleToggleBlockUser(u)}
+                            className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 transition-colors ${
+                              u.isBlocked
+                                ? 'bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800'
+                                : 'bg-amber-950 hover:bg-amber-900 text-amber-300 border border-amber-800'
+                            }`}
+                          >
+                            <Ban className="w-3.5 h-3.5" />
+                            <span>{u.isBlocked ? 'إلغاء الحظر' : 'حظر الحساب'}</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleDeleteUser(u.uid)}
+                            className="p-2 rounded-xl bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 transition-colors"
+                            title="حذف المستخدم وجميع بياناته"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* TAB 3 & 4: المحتوى والفيديوهات (Content / Videos) */}
           {(activeTab === 'content' || activeTab === 'videos') && (
@@ -1708,124 +1958,235 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {sortedVideosByViews.map((video) => (
-                  <div
-                    key={video.id}
-                    className="p-3.5 rounded-2xl bg-[#091224] border border-cyan-950 flex flex-col gap-3"
-                  >
-                    <div className="relative aspect-video rounded-xl overflow-hidden bg-slate-900">
-                      <img src={video.thumbnailDataUrl} alt="" className="w-full h-full object-cover" />
-                      <span className="absolute top-2 start-2 px-2 py-0.5 rounded bg-black/80 text-[10px] font-bold text-cyan-300">
-                        {video.type === 'short' ? 'Short' : 'فيديو'}
-                      </span>
-                    </div>
+              {(() => {
+                const searchKey = activeTab === 'content' ? 'content' : 'videos';
+                const q = (getTabSearch(searchKey) || getTabSearch('content') || getTabSearch('videos')).toLowerCase().trim();
+                const filteredVideos = sortedVideosByViews.filter((video) => {
+                  if (!q) return true;
+                  return (
+                    (video.title || '').toLowerCase().includes(q) ||
+                    (video.description || '').toLowerCase().includes(q) ||
+                    (video.publisherName || '').toLowerCase().includes(q) ||
+                    (video.id || '').toLowerCase().includes(q) ||
+                    (video.type || '').toLowerCase().includes(q)
+                  );
+                });
 
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold text-xs text-slate-100 line-clamp-1">{video.title}</h3>
-                      <p className="text-[11px] text-slate-400 mt-0.5 truncate">الناشر: {video.publisherName}</p>
-                      <div className="flex items-center gap-3 text-[11px] text-cyan-400 mt-2 font-semibold">
-                        <span>{video.views || 0} مشاهدة</span>
-                        <span>•</span>
-                        <span>{video.likes || 0} إعجاب</span>
-                        <span>•</span>
-                        <span>{video.commentsCount || 0} تعليق</span>
-                      </div>
-                    </div>
+                return (
+                  <>
+                    <DevTabSearchBar
+                      value={getTabSearch(searchKey)}
+                      onChange={(v) => {
+                        setTabSearch('content', v);
+                        setTabSearch('videos', v);
+                      }}
+                      placeholder="ابحث في الفيديوهات بالعنوان، الوصف، اسم الناشر، المعرف ID، أو نوع الفيديو (short / video)..."
+                      totalCount={sortedVideosByViews.length}
+                      filteredCount={filteredVideos.length}
+                    />
 
-                    <div className="flex items-center gap-2 pt-2 border-t border-cyan-950">
-                      <button
-                        onClick={() => setInspectingVideo(video)}
-                        className="flex-1 py-1.5 bg-cyan-950 hover:bg-cyan-900 text-cyan-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>عرض التفاصيل</span>
-                      </button>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {filteredVideos.length === 0 ? (
+                        <div className="col-span-full p-12 text-center rounded-2xl bg-[#091224] border border-cyan-950 text-slate-500 text-xs">
+                          {q ? 'لا توجد فيديوهات مطابقة لبحثك في المحتوى.' : 'لا توجد فيديوهات منشورة حالياً.'}
+                        </div>
+                      ) : (
+                        filteredVideos.map((video) => (
+                          <div
+                            key={video.id}
+                            className="p-3.5 rounded-2xl bg-[#091224] border border-cyan-950 flex flex-col gap-3"
+                          >
+                            <div className="relative aspect-video rounded-xl overflow-hidden bg-slate-900">
+                              <img src={video.thumbnailDataUrl} alt="" className="w-full h-full object-cover" />
+                              <span className="absolute top-2 start-2 px-2 py-0.5 rounded bg-black/80 text-[10px] font-bold text-cyan-300">
+                                {video.type === 'short' ? 'Short' : 'فيديو'}
+                              </span>
+                            </div>
 
-                      <button
-                        onClick={() => handleDeleteVideo(video.id, video.publisherUid)}
-                        className="p-1.5 bg-rose-950 hover:bg-rose-900 text-rose-300 rounded-xl"
-                        title="حذف الفيديو"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-bold text-xs text-slate-100 line-clamp-1">{video.title}</h3>
+                              <p className="text-[11px] text-slate-400 mt-0.5 truncate">الناشر: {video.publisherName}</p>
+                              <div className="flex items-center gap-3 text-[11px] text-cyan-400 mt-2 font-semibold">
+                                <span>{video.views || 0} مشاهدة</span>
+                                <span>•</span>
+                                <span>{video.likes || 0} إعجاب</span>
+                                <span>•</span>
+                                <span>{video.commentsCount || 0} تعليق</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 pt-2 border-t border-cyan-950">
+                              <button
+                                onClick={() => setInspectingVideo(video)}
+                                className="flex-1 py-1.5 bg-cyan-950 hover:bg-cyan-900 text-cyan-300 rounded-xl text-xs font-bold flex items-center justify-center gap-1"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>عرض التفاصيل</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleDeleteVideo(video.id, video.publisherUid)}
+                                className="p-1.5 bg-rose-950 hover:bg-rose-900 text-rose-300 rounded-xl"
+                                title="حذف الفيديو"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
-                  </div>
-                ))}
-              </div>
+                  </>
+                );
+              })()}
             </div>
           )}
 
           {/* TAB 5: البحث المباشر (Search) */}
-          {activeTab === 'search' && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
-                <Search className="w-5 h-5 text-cyan-400" />
-                <span>البحث المباشر في قاعدة البيانات</span>
-              </h2>
+          {activeTab === 'search' && (() => {
+            const currentSearch = getTabSearch('search') || globalSearch;
+            const q = currentSearch.toLowerCase().trim();
 
-              <input
-                type="text"
-                value={globalSearch}
-                onChange={(e) => setGlobalSearch(e.target.value)}
-                placeholder="ابحث عن مستخدم، بريد، عنوان فيديو، أو منشور..."
-                className="w-full bg-[#091224] border border-cyan-900 focus:border-cyan-400 rounded-2xl px-5 py-3 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none"
-              />
+            const matchingVideos = videos.filter(
+              (v) =>
+                (v.title || '').toLowerCase().includes(q) ||
+                (v.publisherName || '').toLowerCase().includes(q) ||
+                (v.description || '').toLowerCase().includes(q) ||
+                (v.id || '').toLowerCase().includes(q)
+            );
 
-              {globalSearch.trim() && (
-                <div className="space-y-4 mt-4">
-                  {/* Matching Videos */}
-                  <div className="p-4 rounded-2xl bg-[#091224] border border-cyan-950">
-                    <h3 className="font-bold text-xs text-cyan-300 mb-2">الفيديوهات المطابقة:</h3>
-                    {videos
-                      .filter((v) => v.title.toLowerCase().includes(globalSearch.toLowerCase()))
-                      .map((v) => (
-                        <div key={v.id} className="py-2 flex items-center justify-between text-xs border-b border-cyan-950/40">
-                          <span>{v.title} ({v.publisherName})</span>
-                          <button
-                            onClick={() => setInspectingVideo(v)}
-                            className="text-cyan-400 hover:underline"
-                          >
-                            معاينة
-                          </button>
-                        </div>
-                      ))}
+            const matchingUsers = users.filter(
+              (u) =>
+                (u.username || '').toLowerCase().includes(q) ||
+                (u.email || '').toLowerCase().includes(q) ||
+                (u.uid || '').toLowerCase().includes(q)
+            );
+
+            const matchingPosts = posts.filter(
+              (p) =>
+                (p.channelName || '').toLowerCase().includes(q) ||
+                (p.text || '').toLowerCase().includes(q)
+            );
+
+            const totalMatches = matchingVideos.length + matchingUsers.length + matchingPosts.length;
+
+            return (
+              <div className="space-y-4">
+                <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
+                  <Search className="w-5 h-5 text-cyan-400" />
+                  <span>البحث المباشر الشامل في قاعدة البيانات</span>
+                </h2>
+
+                <DevTabSearchBar
+                  value={currentSearch}
+                  onChange={(v) => {
+                    setTabSearch('search', v);
+                    setGlobalSearch(v);
+                  }}
+                  placeholder="ابحث عن مستخدم، بريد، عنوان فيديو، معرف ID، أو منشور في المجتمع..."
+                  totalCount={videos.length + users.length + posts.length}
+                  filteredCount={totalMatches}
+                />
+
+                {q && (
+                  <div className="space-y-4 mt-4">
+                    {/* Matching Videos */}
+                    <div className="p-4 rounded-2xl bg-[#091224] border border-cyan-950">
+                      <h3 className="font-bold text-xs text-cyan-300 mb-2">
+                        الفيديوهات المطابقة ({matchingVideos.length}):
+                      </h3>
+                      {matchingVideos.length === 0 ? (
+                        <p className="text-xs text-slate-500">لا توجد فيديوهات مطابقة</p>
+                      ) : (
+                        matchingVideos.map((v) => (
+                          <div key={v.id} className="py-2 flex items-center justify-between text-xs border-b border-cyan-950/40">
+                            <span>{v.title} ({v.publisherName})</span>
+                            <button
+                              onClick={() => setInspectingVideo(v)}
+                              className="text-cyan-400 hover:underline"
+                            >
+                              معاينة
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Matching Users */}
+                    <div className="p-4 rounded-2xl bg-[#091224] border border-cyan-950">
+                      <h3 className="font-bold text-xs text-cyan-300 mb-2">
+                        المستخدمون المطابقون ({matchingUsers.length}):
+                      </h3>
+                      {matchingUsers.length === 0 ? (
+                        <p className="text-xs text-slate-500">لا يوجد مستخدمون مطابقون</p>
+                      ) : (
+                        matchingUsers.map((u) => (
+                          <div key={u.uid} className="py-2 flex items-center justify-between text-xs border-b border-cyan-950/40">
+                            <span>{u.username} — {u.email}</span>
+                            <span className="text-slate-400">{u.deviceType}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Matching Community Posts */}
+                    <div className="p-4 rounded-2xl bg-[#091224] border border-cyan-950">
+                      <h3 className="font-bold text-xs text-cyan-300 mb-2">
+                        منشورات المجتمع المطابقة ({matchingPosts.length}):
+                      </h3>
+                      {matchingPosts.length === 0 ? (
+                        <p className="text-xs text-slate-500">لا توجد منشورات مطابقة</p>
+                      ) : (
+                        matchingPosts.map((p) => (
+                          <div key={p.id} className="py-2 flex items-center justify-between text-xs border-b border-cyan-950/40">
+                            <span className="truncate max-w-md">{p.channelName}: {p.text}</span>
+                            <span className="text-slate-500 text-[10px]">{new Date(p.createdAt).toLocaleDateString()}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
-
-                  {/* Matching Users */}
-                  <div className="p-4 rounded-2xl bg-[#091224] border border-cyan-950">
-                    <h3 className="font-bold text-xs text-cyan-300 mb-2">المستخدمون المطابقون:</h3>
-                    {users
-                      .filter(
-                        (u) =>
-                          u.username.toLowerCase().includes(globalSearch.toLowerCase()) ||
-                          u.email.toLowerCase().includes(globalSearch.toLowerCase())
-                      )
-                      .map((u) => (
-                        <div key={u.uid} className="py-2 flex items-center justify-between text-xs border-b border-cyan-950/40">
-                          <span>{u.username} — {u.email}</span>
-                          <span className="text-slate-400">{u.deviceType}</span>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            );
+          })()}
 
           {/* TAB 6: الشكاوى (Support Complaints) */}
-          {activeTab === 'support' && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
-                <MessageSquareWarning className="w-5 h-5 text-cyan-400" />
-                <span>شكاوى وتواصل المستخدمين ({tickets.length})</span>
-              </h2>
+          {activeTab === 'support' && (() => {
+            const q = getTabSearch('support').toLowerCase().trim();
+            const filteredTickets = tickets.filter((t) => {
+              if (!q) return true;
+              return (
+                (t.userName || '').toLowerCase().includes(q) ||
+                (t.userEmail || '').toLowerCase().includes(q) ||
+                (t.text || '').toLowerCase().includes(q) ||
+                (t.developerReply || '').toLowerCase().includes(q) ||
+                (t.status || '').toLowerCase().includes(q)
+              );
+            });
 
-              <div className="space-y-3">
-                {tickets.length === 0 ? (
-                  <p className="p-8 text-center text-xs text-slate-500">لا توجد شكاوى واردة حالياً</p>
-                ) : (
-                  tickets.map((t) => (
+            return (
+              <div className="space-y-4">
+                <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
+                  <MessageSquareWarning className="w-5 h-5 text-cyan-400" />
+                  <span>شكاوى وتواصل المستخدمين ({tickets.length})</span>
+                </h2>
+
+                <DevTabSearchBar
+                  value={getTabSearch('support')}
+                  onChange={(v) => setTabSearch('support', v)}
+                  placeholder="ابحث في شكاوى الدعم بالاسم، البريد، نص الرسالة، أو حالة الشكوى..."
+                  totalCount={tickets.length}
+                  filteredCount={filteredTickets.length}
+                />
+
+                <div className="space-y-3">
+                  {filteredTickets.length === 0 ? (
+                    <p className="p-8 text-center text-xs text-slate-500">
+                      {q ? 'لا توجد شكاوى مطابقة لبحثك.' : 'لا توجد شكاوى واردة حالياً'}
+                    </p>
+                  ) : (
+                    filteredTickets.map((t) => (
                     <div key={t.id} className="p-4 rounded-2xl bg-[#091224] border border-cyan-950 space-y-3">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2.5">
@@ -1897,275 +2258,551 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
                 )}
               </div>
             </div>
-          )}
+          );
+        })()}
 
           {/* TAB 7: التحكم في الخلفية (Background Control) */}
-          {activeTab === 'background' && (
-            <div className="max-w-xl space-y-5">
-              <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
-                <Palette className="w-5 h-5 text-cyan-400" />
-                <span>التحكم في خلفيات الموقع (من الجهاز فقط)</span>
-              </h2>
+          {activeTab === 'background' && (() => {
+            const q = getTabSearch('background').toLowerCase().trim();
+            const animOptions = [
+              { id: 'nebula', label: 'انسياب السديم الفضائي (Nebula Drift)' },
+              { id: 'stars', label: 'تلألؤ النجوم (Star Twinkle)' },
+              { id: 'pulse', label: 'نبض المجرة (Pulse Glow)' },
+              { id: 'none', label: 'خلفية ثابتة بدون حركة' },
+            ].filter(o => !q || o.label.toLowerCase().includes(q) || o.id.includes(q));
 
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-300">اختر صورة الخلفية من جهازك:</label>
-                <label className="flex flex-col items-center justify-center border-2 border-dashed border-cyan-900 hover:border-cyan-400 rounded-2xl p-6 bg-[#091224] cursor-pointer transition-all">
-                  <Upload className="w-8 h-8 text-cyan-400 mb-2" />
-                  <span className="text-xs font-bold text-slate-200">
-                    {bgImageDataUrl ? 'تم تحميل صورة الخلفية بنجاح' : 'انقر لرفع صورة الخلفية من جهازك'}
-                  </span>
-                  <input type="file" accept="image/*" onChange={handleBgUpload} className="hidden" />
-                </label>
-              </div>
+            return (
+              <div className="max-w-xl space-y-5">
+                <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
+                  <Palette className="w-5 h-5 text-cyan-400" />
+                  <span>التحكم في خلفيات الموقع (من الجهاز فقط)</span>
+                </h2>
 
-              {bgImageDataUrl && (
-                <div className="w-full aspect-video rounded-2xl overflow-hidden border border-cyan-400/50 shadow-xl">
-                  <img src={bgImageDataUrl} alt="Background Preview" className="w-full h-full object-cover" />
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-300">القسم المستهدف:</label>
-                <select
-                  value={bgSection}
-                  onChange={(e) => setBgSection(e.target.value as any)}
-                  className="w-full bg-[#091224] border border-cyan-950 rounded-xl p-2.5 text-xs text-slate-100"
-                >
-                  <option value="all">كامل الموقع (Background All)</option>
-                  <option value="header">الشريط العلوي فقط</option>
-                  <option value="sidebar">القائمة الجانبية</option>
-                  <option value="content">منطقة المحتوى الرئيسية</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-300">نوع Animation الخلفية:</label>
-                <select
-                  value={bgAnimation}
-                  onChange={(e) => setBgAnimation(e.target.value as any)}
-                  className="w-full bg-[#091224] border border-cyan-950 rounded-xl p-2.5 text-xs text-slate-100"
-                >
-                  <option value="nebula">انسياب السديم الفضائي (Nebula Drift)</option>
-                  <option value="stars">تلألؤ النجوم (Star Twinkle)</option>
-                  <option value="pulse">نبض المجرة (Pulse Glow)</option>
-                  <option value="none">خلفية ثابتة بدون حركة</option>
-                </select>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={handleApplyBackground}
-                  className="flex-1 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-extrabold rounded-xl text-xs shadow-lg"
-                >
-                  تطبيق وحفظ الخلفية
-                </button>
-                <button
-                  onClick={handleRemoveBackground}
-                  className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold"
-                >
-                  إزالة الخلفية
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 8: التحكم بلوجو الموقع (Logo Control) */}
-          {activeTab === 'logo' && (
-            <div className="max-w-xl space-y-5">
-              <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
-                <ImageIcon className="w-5 h-5 text-cyan-400" />
-                <span>التحكم بلوجو الموقع الرسمي</span>
-              </h2>
-
-              <div className="flex items-center gap-6 p-6 rounded-2xl bg-[#091224] border border-cyan-950">
-                <CosmicLogo customLogoUrl={customLogoDataUrl || developerSettings?.customLogoUrl} size="lg" />
-                <div>
-                  <h3 className="font-bold text-sm text-slate-100">Yassa Tube</h3>
-                  <span className="text-xs text-slate-400">اللوجو الرسمي الظاهر للمستخدمين في الشريط العلوي</span>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-300">رفع لوجو جديد (من جهازك فقط):</label>
-                <label className="flex flex-col items-center justify-center border-2 border-dashed border-cyan-900 hover:border-cyan-400 rounded-2xl p-6 bg-[#091224] cursor-pointer transition-all">
-                  <Upload className="w-8 h-8 text-cyan-400 mb-2" />
-                  <span className="text-xs font-bold text-slate-200">اختر ملف لوجو من جهازك</span>
-                  <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
-                </label>
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={handleApplyLogo}
-                  className="flex-1 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-extrabold rounded-xl text-xs shadow-lg"
-                >
-                  تعيين اللوجو الجديد
-                </button>
-                <button
-                  onClick={handleResetLogo}
-                  className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold"
-                >
-                  استعادة اللوجو الأصلي
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 9: الاشتراكات (Subscriptions) */}
-          {activeTab === 'subscriptions' && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
-                <Tv className="w-5 h-5 text-cyan-400" />
-                <span>سجل الاشتراكات الفعلي ({subscriptions.length})</span>
-              </h2>
-
-              <div className="divide-y divide-cyan-950/60 bg-[#091224] border border-cyan-950 rounded-2xl overflow-hidden">
-                {subscriptions.map((sub) => (
-                  <div key={sub.id} className="p-3.5 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-bold text-slate-200">صاحب الاشتراك: {sub.subscriberUid}</span>
-                      <span className="block text-[11px] text-cyan-400 mt-0.5">القناة: {sub.channelName}</span>
-                    </div>
-                    <span className="text-slate-400">{new Date(sub.createdAt).toLocaleDateString()}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 10: المنشورات (Posts) */}
-          {activeTab === 'posts' && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
-                <Users2 className="w-5 h-5 text-cyan-400" />
-                <span>منشورات المجتمع ({posts.length})</span>
-              </h2>
-
-              <div className="space-y-3">
-                {posts.map((post) => (
-                  <div key={post.id} className="p-4 rounded-2xl bg-[#091224] border border-cyan-950 flex items-start justify-between gap-4">
-                    <div>
-                      <span className="font-bold text-xs text-cyan-300">{post.channelName}</span>
-                      <p className="text-xs text-slate-200 mt-1">{post.text}</p>
-                    </div>
-                    <button
-                      onClick={() => deletePost(post.id)}
-                      className="p-2 bg-rose-950 text-rose-300 hover:bg-rose-900 rounded-xl"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 11: سجل النشاط (Activity Logs - Logged in users only) */}
-          {activeTab === 'activity' && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
-                <Activity className="w-5 h-5 text-cyan-400" />
-                <span>سجل النشاط المباشر للمستخدمين المسجلين ({logs.length})</span>
-              </h2>
-
-              <div className="divide-y divide-cyan-950/60 bg-[#091224] border border-cyan-950 rounded-2xl overflow-hidden">
-                {logs.map((log) => (
-                  <div key={log.id} className="p-3 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-bold text-slate-200">{log.userName}: </span>
-                      <span className="text-slate-300">{log.details}</span>
-                    </div>
-                    <span className="text-[11px] text-slate-500">
-                      {new Date(log.createdAt).toLocaleString()}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 12: إعدادات المطور (Settings) */}
-          {activeTab === 'settings' && (
-            <div className="max-w-xl space-y-4">
-              <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
-                <Settings className="w-5 h-5 text-cyan-400" />
-                <span>إعدادات النظام والإدارة</span>
-              </h2>
-
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-300">شريط إعلان وتنبيه عام لجميع زوار الموقع:</label>
-                <textarea
-                  value={siteNotice}
-                  onChange={(e) => setSiteNotice(e.target.value)}
-                  rows={3}
-                  placeholder="اكتب إعلاناً أو تنبيهاً يظهر في أعلى الموقع لجميع الزوار..."
-                  className="w-full bg-[#091224] border border-cyan-950 rounded-xl p-3 text-xs text-slate-100"
+                <DevTabSearchBar
+                  value={getTabSearch('background')}
+                  onChange={(v) => setTabSearch('background', v)}
+                  placeholder="ابحث في إعدادات الخلفية والأنيميشن والأقسام..."
                 />
-              </div>
 
-              <button
-                onClick={async () => {
-                  await saveDeveloperSettings({
-                    ...developerSettings,
-                    siteNotice
-                  });
-                  showToast('تم حفظ ونشر التنبيه العام في الموقع', 'success');
-                }}
-                className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold"
-              >
-                حفظ التنبيه
-              </button>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-300">اختر صورة الخلفية من جهازك:</label>
+                  <label className="flex flex-col items-center justify-center border-2 border-dashed border-cyan-900 hover:border-cyan-400 rounded-2xl p-6 bg-[#091224] cursor-pointer transition-all">
+                    <Upload className="w-8 h-8 text-cyan-400 mb-2" />
+                    <span className="text-xs font-bold text-slate-200">
+                      {bgImageDataUrl ? 'تم تحميل صورة الخلفية بنجاح' : 'انقر لرفع صورة الخلفية من جهازك'}
+                    </span>
+                    <input type="file" accept="image/*" onChange={handleBgUpload} className="hidden" />
+                  </label>
+                </div>
 
-              <hr className="my-6 border-cyan-950/80" />
-
-              {/* Upload source controls */}
-              <div className="p-4 rounded-2xl bg-[#09152a] border border-cyan-900/60 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <h4 className="text-xs font-bold text-slate-100">إظهار خانة رفع الفيديو المباشر من الجهاز</h4>
-                    <p className="text-[11px] text-slate-400">
-                      عند التفعيل، تظهر خانة تخزين الجهاز المباشر داخل نافذة رفع الفيديو إلى جانب الرفع السحابي.
-                    </p>
+                {bgImageDataUrl && (
+                  <div className="w-full aspect-video rounded-2xl overflow-hidden border border-cyan-400/50 shadow-xl">
+                    <img src={bgImageDataUrl} alt="Background Preview" className="w-full h-full object-cover" />
                   </div>
-                  <button
-                    onClick={async () => {
-                      const updated = !developerSettings?.allowDeviceDirectStorageUpload;
-                      await saveDeveloperSettings({
-                        ...developerSettings,
-                        allowDeviceDirectStorageUpload: updated
-                      });
-                      showToast(updated ? 'تم إظهار خانة رفع الفيديو من الجهاز' : 'تم إخفاء خانة رفع الفيديو من الجهاز', 'success');
-                    }}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                      developerSettings?.allowDeviceDirectStorageUpload
-                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                    }`}
+                )}
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-300">القسم المستهدف:</label>
+                  <select
+                    value={bgSection}
+                    onChange={(e) => setBgSection(e.target.value as any)}
+                    className="w-full bg-[#091224] border border-cyan-950 rounded-xl p-2.5 text-xs text-slate-100"
                   >
-                    {developerSettings?.allowDeviceDirectStorageUpload ? 'مُفعّلة (ظاهرة)' : 'مُعطّلة (مخفية)'}
+                    <option value="all">كامل الموقع (Background All)</option>
+                    <option value="header">الشريط العلوي فقط</option>
+                    <option value="sidebar">القائمة الجانبية</option>
+                    <option value="content">منطقة المحتوى الرئيسية</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-300">نوع Animation الخلفية:</label>
+                  <select
+                    value={bgAnimation}
+                    onChange={(e) => setBgAnimation(e.target.value as any)}
+                    className="w-full bg-[#091224] border border-cyan-950 rounded-xl p-2.5 text-xs text-slate-100"
+                  >
+                    {animOptions.map(opt => (
+                      <option key={opt.id} value={opt.id}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={handleApplyBackground}
+                    className="flex-1 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-extrabold rounded-xl text-xs shadow-lg"
+                  >
+                    تطبيق وحفظ الخلفية
+                  </button>
+                  <button
+                    onClick={handleRemoveBackground}
+                    className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold"
+                  >
+                    إزالة الخلفية
                   </button>
                 </div>
               </div>
+            );
+          })()}
 
-              <hr className="my-6 border-cyan-950/80" />
-              <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-900/60 space-y-3">
-                <div className="flex items-center gap-2 text-rose-400 font-bold text-sm">
-                  <AlertTriangle className="w-4 h-4" />
-                  <span>منطقة الخطر الشاملة (Danger Zone)</span>
+          {/* TAB 8: التحكم بلوجو الموقع (Logo Control) */}
+          {activeTab === 'logo' && (() => {
+            return (
+              <div className="max-w-xl space-y-5">
+                <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
+                  <ImageIcon className="w-5 h-5 text-cyan-400" />
+                  <span>التحكم بلوجو الموقع الرسمي</span>
+                </h2>
+
+                <DevTabSearchBar
+                  value={getTabSearch('logo')}
+                  onChange={(v) => setTabSearch('logo', v)}
+                  placeholder="ابحث في خصائص وإعدادات اللوجو والشعار..."
+                />
+
+                <div className="flex items-center gap-6 p-6 rounded-2xl bg-[#091224] border border-cyan-950">
+                  <CosmicLogo customLogoUrl={customLogoDataUrl || developerSettings?.customLogoUrl} size="lg" />
+                  <div>
+                    <h3 className="font-bold text-sm text-slate-100">Yassa Tube</h3>
+                    <span className="text-xs text-slate-400">اللوجو الرسمي الظاهر للمستخدمين في الشريط العلوي</span>
+                  </div>
                 </div>
-                <p className="text-xs text-rose-200/80 leading-relaxed">
-                  تصفير الموقع ومسح جميع الفيديوهات، مقاطع Shorts، منشورات المجتمع، والتعليقات بالكامل من قاعدة البيانات.
-                </p>
-                <button
-                  onClick={handleWipeAllSiteData}
-                  className="w-full py-3 bg-gradient-to-r from-rose-700 to-red-600 hover:from-rose-600 hover:to-red-500 text-white rounded-xl text-xs font-black shadow-lg shadow-rose-950/80 flex items-center justify-center gap-2 transition-all"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  <span>تصفير ومسح كافة محتويات وفيديوهات الموقع الآن</span>
-                </button>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-300">رفع لوجو جديد (من جهازك فقط):</label>
+                  <label className="flex flex-col items-center justify-center border-2 border-dashed border-cyan-900 hover:border-cyan-400 rounded-2xl p-6 bg-[#091224] cursor-pointer transition-all">
+                    <Upload className="w-8 h-8 text-cyan-400 mb-2" />
+                    <span className="text-xs font-bold text-slate-200">اختر ملف لوجو من جهازك</span>
+                    <input type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
+                  </label>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={handleApplyLogo}
+                    className="flex-1 py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-extrabold rounded-xl text-xs shadow-lg"
+                  >
+                    تعيين اللوجو الجديد
+                  </button>
+                  <button
+                    onClick={handleResetLogo}
+                    className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold"
+                  >
+                    استعادة اللوجو الأصلي
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
+
+          {/* TAB 9: الاشتراكات (Subscriptions) */}
+          {activeTab === 'subscriptions' && (() => {
+            const q = getTabSearch('subscriptions').toLowerCase().trim();
+            const filteredSubs = subscriptions.filter((sub) => {
+              if (!q) return true;
+              return (
+                (sub.subscriberUid || '').toLowerCase().includes(q) ||
+                (sub.channelName || '').toLowerCase().includes(q) ||
+                (sub.id || '').toLowerCase().includes(q)
+              );
+            });
+
+            return (
+              <div className="space-y-4">
+                <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
+                  <Tv className="w-5 h-5 text-cyan-400" />
+                  <span>سجل الاشتراكات الفعلي ({subscriptions.length})</span>
+                </h2>
+
+                <DevTabSearchBar
+                  value={getTabSearch('subscriptions')}
+                  onChange={(v) => setTabSearch('subscriptions', v)}
+                  placeholder="ابحث في الاشتراكات بمعرف المشترك، اسم القناة، أو المعرف ID..."
+                  totalCount={subscriptions.length}
+                  filteredCount={filteredSubs.length}
+                />
+
+                <div className="divide-y divide-cyan-950/60 bg-[#091224] border border-cyan-950 rounded-2xl overflow-hidden">
+                  {filteredSubs.length === 0 ? (
+                    <p className="p-8 text-center text-xs text-slate-500">
+                      {q ? 'لا توجد اشتراكات مطابقة لبحثك.' : 'لا توجد اشتراكات مسجلة بعد'}
+                    </p>
+                  ) : (
+                    filteredSubs.map((sub) => (
+                      <div key={sub.id} className="p-3.5 flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-bold text-slate-200">صاحب الاشتراك: {sub.subscriberUid}</span>
+                          <span className="block text-[11px] text-cyan-400 mt-0.5">القناة: {sub.channelName}</span>
+                        </div>
+                        <span className="text-slate-400">{new Date(sub.createdAt).toLocaleDateString()}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* TAB 10: المنشورات (Posts) */}
+          {activeTab === 'posts' && (() => {
+            const q = getTabSearch('posts').toLowerCase().trim();
+            const filteredPosts = posts.filter((post) => {
+              if (!q) return true;
+              return (
+                (post.channelName || '').toLowerCase().includes(q) ||
+                (post.text || '').toLowerCase().includes(q) ||
+                (post.id || '').toLowerCase().includes(q) ||
+                (post.channelUid || '').toLowerCase().includes(q)
+              );
+            });
+
+            return (
+              <div className="space-y-4">
+                <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
+                  <Users2 className="w-5 h-5 text-cyan-400" />
+                  <span>منشورات المجتمع ({posts.length})</span>
+                </h2>
+
+                <DevTabSearchBar
+                  value={getTabSearch('posts')}
+                  onChange={(v) => setTabSearch('posts', v)}
+                  placeholder="ابحث في منشورات المجتمع باسم القناة، محتوى المنشور، أو المعرف ID..."
+                  totalCount={posts.length}
+                  filteredCount={filteredPosts.length}
+                />
+
+                <div className="space-y-3">
+                  {filteredPosts.length === 0 ? (
+                    <p className="p-8 text-center text-xs text-slate-500">
+                      {q ? 'لا توجد منشورات مطابقة لبحثك.' : 'لا توجد منشورات مجتمع مسجلة بعد'}
+                    </p>
+                  ) : (
+                    filteredPosts.map((post) => (
+                      <div key={post.id} className="p-4 rounded-2xl bg-[#091224] border border-cyan-950 flex items-start justify-between gap-4">
+                        <div>
+                          <span className="font-bold text-xs text-cyan-300">{post.channelName}</span>
+                          <p className="text-xs text-slate-200 mt-1">{post.text}</p>
+                        </div>
+                        <button
+                          onClick={() => deletePost(post.id)}
+                          className="p-2 bg-rose-950 text-rose-300 hover:bg-rose-900 rounded-xl"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* TAB 11: سجل النشاط (Activity Logs - Logged in users only) */}
+          {activeTab === 'activity' && (() => {
+            const q = getTabSearch('activity').toLowerCase().trim();
+            const filteredLogs = logs.filter((log) => {
+              if (!q) return true;
+              return (
+                (log.userName || '').toLowerCase().includes(q) ||
+                (log.details || '').toLowerCase().includes(q) ||
+                (log.id || '').toLowerCase().includes(q) ||
+                (log.userUid || '').toLowerCase().includes(q)
+              );
+            });
+
+            return (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-cyan-400" />
+                    <span>سجل النشاط المباشر للمستخدمين المسجلين ({logs.length})</span>
+                  </h2>
+                  <button
+                    onClick={async () => {
+                      if (window.confirm('هل أنت متأكد من رغبتك في حذف وتفريغ كافة سجلات النشاط للمستخدمين؟')) {
+                        await clearAllActivityLogs();
+                        showToast('تم حذف وتفريغ جميع سجلات النشاط بنجاح', 'success');
+                      }
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-200 text-xs font-bold transition-all shadow active:scale-95"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>حذف جميع النشاطات</span>
+                  </button>
+                </div>
+
+                <DevTabSearchBar
+                  value={getTabSearch('activity')}
+                  onChange={(v) => setTabSearch('activity', v)}
+                  placeholder="ابحث في سجل النشاط باسم المستخدم، نص النشاط، أو التاريخ..."
+                  totalCount={logs.length}
+                  filteredCount={filteredLogs.length}
+                />
+
+                <div className="divide-y divide-cyan-950/60 bg-[#091224] border border-cyan-950 rounded-2xl overflow-hidden">
+                  {filteredLogs.length === 0 ? (
+                    <p className="p-8 text-center text-xs text-slate-500">
+                      {q ? 'لا توجد سجلات نشاط مطابقة لبحثك.' : 'لا توجد سجلات نشاط مسجلة حالياً'}
+                    </p>
+                  ) : (
+                    filteredLogs.map((log) => (
+                      <div key={log.id} className="p-3 flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-bold text-slate-200">{log.userName}: </span>
+                          <span className="text-slate-300">{log.details}</span>
+                        </div>
+                        <span className="text-[11px] text-slate-500">
+                          {new Date(log.createdAt).toLocaleString()}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* TAB 12: إعدادات المطور (Settings) */}
+          {activeTab === 'settings' && (() => {
+            const q = getTabSearch('settings').toLowerCase().trim();
+            const showNotice = !q || 'إعلان تنبيه عام شريط إشعار notice'.includes(q);
+            const showDeviceUpload = !q || 'رفع فيديو مباشر جهاز تخزين ديفايس device upload'.includes(q);
+            const showDangerZone = !q || 'تصفير حذف مسح قاعدة بيانات خطر danger wipe reset'.includes(q);
+
+            return (
+              <div className="max-w-xl space-y-4">
+                <h2 className="text-lg font-black text-slate-100 flex items-center gap-2">
+                  <Settings className="w-5 h-5 text-cyan-400" />
+                  <span>إعدادات النظام والإدارة</span>
+                </h2>
+
+                <DevTabSearchBar
+                  value={getTabSearch('settings')}
+                  onChange={(v) => setTabSearch('settings', v)}
+                  placeholder="ابحث في إعدادات النظام، التنبيهات، خيارات الرفع، أو منطقة الخطر..."
+                />
+
+                {showNotice && (
+                  <div className="p-5 rounded-2xl bg-[#09152a] border border-cyan-900/60 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 rounded-lg bg-cyan-500/20 text-cyan-300">
+                          <Megaphone className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h3 className="text-xs font-bold text-slate-100">شريط إعلان وتنبيه عام احترافي للمستخدمين</h3>
+                          <p className="text-[11px] text-slate-400">يظهر في أعلى الموقع لجميع الزوار مع أنيميشن مخصص وزر إغلاق X</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-slate-300">نص التنبيه:</label>
+                      <textarea
+                        value={siteNotice}
+                        onChange={(e) => setSiteNotice(e.target.value)}
+                        rows={3}
+                        placeholder="اكتب رسالة الإعلان أو التنبيه هنا..."
+                        className="w-full bg-[#070e1c] border border-cyan-950 rounded-xl p-3 text-xs text-slate-100 focus:outline-none focus:border-cyan-500"
+                      />
+                    </div>
+
+                    {/* Animation Selector */}
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span>أنيميشن ومظهر التنبيه الخرافي (7 أنماط حركية):</span>
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {[
+                          { id: 'cosmic-pulse', name: 'النبض الكوني (Cosmic Pulse)', desc: 'تدرج كوني ناعم مع نبض هادئ' },
+                          { id: 'neon-glow', name: 'توهج النيون (Neon Glow)', desc: 'إطار نيون سماوي مشع' },
+                          { id: 'floating', name: 'الانسياب العائم (Floating Glow)', desc: 'حركة نبضية خفية أنيقة' },
+                          { id: 'gradient-wave', name: 'الموجة التدرجية (Gradient Wave)', desc: 'موجة لونية بين السماوي والأزرق' },
+                          { id: 'shimmer', name: 'البريق المتلألئ (Shimmer Flash)', desc: 'توهج لؤلؤي براق' },
+                          { id: 'bounce-soft', name: 'الارتداد الناعم (Soft Bounce)', desc: 'حركة ناعمة جاذبة للانتباه' },
+                          { id: 'aurora', name: 'شفق الأورورا (Aurora Borealis)', desc: 'ألوان الشفق القطبي الساحرة' }
+                        ].map(animItem => (
+                          <button
+                            key={animItem.id}
+                            type="button"
+                            onClick={() => setSiteNoticeAnimation(animItem.id as any)}
+                            className={`p-2.5 rounded-xl border text-start transition-all ${
+                              siteNoticeAnimation === animItem.id
+                                ? 'bg-cyan-950/80 border-cyan-400 text-cyan-200 shadow-md shadow-cyan-950'
+                                : 'bg-[#070e1c] border-cyan-950 text-slate-400 hover:border-cyan-800'
+                            }`}
+                          >
+                            <span className="text-xs font-bold block">{animItem.name}</span>
+                            <span className="text-[10px] text-slate-400 block mt-0.5">{animItem.desc}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Single Image Attachment */}
+                    <div className="space-y-2 pt-2 border-t border-cyan-950">
+                      <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>إرفاق صورة واحدة مع التنبيه (اختياري من جهازك):</span>
+                        </span>
+                        {siteNoticeImageUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setSiteNoticeImageUrl(null)}
+                            className="text-rose-400 hover:text-rose-300 text-[10px] flex items-center gap-1 font-bold"
+                          >
+                            <X className="w-3 h-3" />
+                            <span>إزالة الصورة</span>
+                          </button>
+                        )}
+                      </label>
+
+                      {siteNoticeImageUrl ? (
+                        <div className="relative w-28 h-20 rounded-xl overflow-hidden border border-cyan-500/60 shadow group">
+                          <img src={siteNoticeImageUrl} alt="معاينة مرفق التنبيه" className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => setSiteNoticeImageUrl(null)}
+                            className="absolute top-1 end-1 p-1 rounded-full bg-black/70 text-rose-300 hover:bg-black"
+                            title="إزالة الصورة"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="flex items-center justify-center gap-2 p-3 rounded-xl border border-dashed border-cyan-900/80 hover:border-cyan-400 bg-[#070e1c] cursor-pointer text-xs text-slate-300 hover:text-white transition-colors">
+                          <Upload className="w-4 h-4 text-cyan-400" />
+                          <span>رفع صورة واحدة من جهازك لإرفاقها بالتنبيه</span>
+                          <input type="file" accept="image/*" onChange={handleNoticeImageUpload} className="hidden" />
+                        </label>
+                      )}
+                    </div>
+
+                    {/* Live Preview Card */}
+                    {siteNotice && (
+                      <div className="space-y-1.5 pt-2 border-t border-cyan-950">
+                        <span className="text-[10px] font-bold text-slate-400">معاينة مباشرة لشكل التنبيه للزوار:</span>
+                        <div className="rounded-xl overflow-hidden border border-cyan-500/40">
+                          <CosmicSiteNotice
+                            settings={{
+                              siteNotice,
+                              siteNoticeAnimation,
+                              siteNoticeImageUrl: siteNoticeImageUrl || undefined
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Submit & Reset Buttons */}
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await saveDeveloperSettings({
+                            ...developerSettings,
+                            siteNotice,
+                            siteNoticeAnimation,
+                            siteNoticeImageUrl: siteNoticeImageUrl || undefined
+                          });
+                          showToast('تم حفظ ونشر التنبيه الاحترافي لجميع المستخدمين بنجاح', 'success');
+                        }}
+                        className="flex-1 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-extrabold shadow-lg shadow-cyan-950/60 transition-all flex items-center justify-center gap-1.5 active:scale-95"
+                      >
+                        <Sparkles className="w-4 h-4 text-amber-300" />
+                        <span>حفظ ونشر التنبيه لجميع المستخدمين</span>
+                      </button>
+
+                      {developerSettings?.siteNotice && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (window.confirm('هل أنت متأكد من رغبتك في إلغاء وحذف التنبيه العام؟')) {
+                              await saveDeveloperSettings({
+                                ...developerSettings,
+                                siteNotice: '',
+                                siteNoticeImageUrl: undefined
+                              });
+                              setSiteNotice('');
+                              setSiteNoticeImageUrl(null);
+                              showToast('تم إلغاء وحذف التنبيه العام بنجاح', 'info');
+                            }
+                          }}
+                          className="px-4 py-2.5 bg-rose-950/80 hover:bg-rose-900 border border-rose-800 text-rose-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5"
+                        >
+                          <X className="w-4 h-4" />
+                          <span>إلغاء التنبيه</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {showDeviceUpload && (
+                  <>
+                    <hr className="my-6 border-cyan-950/80" />
+                    {/* Upload source controls */}
+                    <div className="p-4 rounded-2xl bg-[#09152a] border border-cyan-900/60 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <h4 className="text-xs font-bold text-slate-100">إظهار خانة رفع الفيديو المباشر من الجهاز</h4>
+                          <p className="text-[11px] text-slate-400">
+                            عند التفعيل، تظهر خانة تخزين الجهاز المباشر داخل نافذة رفع الفيديو إلى جانب الرفع السحابي.
+                          </p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            const updated = !developerSettings?.allowDeviceDirectStorageUpload;
+                            await saveDeveloperSettings({
+                              ...developerSettings,
+                              allowDeviceDirectStorageUpload: updated
+                            });
+                            showToast(updated ? 'تم إظهار خانة رفع الفيديو من الجهاز' : 'تم إخفاء خانة رفع الفيديو من الجهاز', 'success');
+                          }}
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                            developerSettings?.allowDeviceDirectStorageUpload
+                              ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                              : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                          }`}
+                        >
+                          {developerSettings?.allowDeviceDirectStorageUpload ? 'مُفعّلة (ظاهرة)' : 'مُعطّلة (مخفية)'}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {showDangerZone && (
+                  <>
+                    <hr className="my-6 border-cyan-950/80" />
+                    <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-900/60 space-y-3">
+                      <div className="flex items-center gap-2 text-rose-400 font-bold text-sm">
+                        <AlertTriangle className="w-4 h-4" />
+                        <span>منطقة الخطر الشاملة (Danger Zone)</span>
+                      </div>
+                      <p className="text-xs text-rose-200/80 leading-relaxed">
+                        تصفير الموقع ومسح جميع الفيديوهات، مقاطع Shorts، منشورات المجتمع، والتعليقات بالكامل من قاعدة البيانات.
+                      </p>
+                      <button
+                        onClick={handleWipeAllSiteData}
+                        className="w-full py-3 bg-gradient-to-r from-rose-700 to-red-600 hover:from-rose-600 hover:to-red-500 text-white rounded-xl text-xs font-black shadow-lg shadow-rose-950/80 flex items-center justify-center gap-2 transition-all"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span>تصفير ومسح كافة محتويات وفيديوهات الموقع الآن</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {!showNotice && !showDeviceUpload && !showDangerZone && (
+                  <p className="p-8 text-center text-xs text-slate-500">لا توجد إعدادات مطابقة لبحثك.</p>
+                )}
+              </div>
+            );
+          })()}
         </main>
       </div>
 

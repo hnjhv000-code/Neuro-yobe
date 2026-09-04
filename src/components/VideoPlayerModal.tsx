@@ -39,6 +39,9 @@ import {
 } from 'lucide-react';
 import { parseVideoUrl } from '../services/embedHelper';
 import { getDriveEmbedUrl } from '../services/googleDrive';
+import { VideoPreRollAd } from './VideoPreRollAd';
+import { VideoBannerAd } from './VideoBannerAd';
+import { shouldDisplayLongVideoAd, shouldDisplayBannerAd } from '../services/adCatalogue';
 import { useReactionBurst, ReactionBurstOverlay } from './ReactionBurst';
 import {
   incrementVideoViews,
@@ -128,7 +131,9 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
   // Video Player state
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [showPreRollAd, setShowPreRollAd] = useState(() => shouldDisplayLongVideoAd());
+  const [showBannerAd] = useState(() => shouldDisplayBannerAd());
+  const [isPlaying, setIsPlaying] = useState(!showPreRollAd);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(video.duration || 0);
   const [isMuted, setIsMuted] = useState(false);
@@ -720,6 +725,20 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
               }}
               className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black border border-cyan-900/30 shadow-2xl shadow-cyan-950/50 flex flex-col justify-end group select-none"
             >
+              {/* Pre-roll Video Ad (Displayed over video before start) */}
+              {showPreRollAd && (
+                <VideoPreRollAd
+                  videoId={video.id}
+                  onAdFinished={() => {
+                    setShowPreRollAd(false);
+                    setIsPlaying(true);
+                    if (videoRef.current) {
+                      videoRef.current.play().catch(() => {});
+                    }
+                  }}
+                />
+              )}
+
               {parsed && parsed.isEmbed && parsed.embedUrl ? (
                 <div className="relative w-full h-full">
                   <iframe
@@ -875,6 +894,11 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Small Non-Intrusive Bottom Banner Ad (Displayed directly below player) */}
+            {showBannerAd && (
+              <VideoBannerAd videoId={video.id} />
+            )}
 
             {/* Chapters / Bookmarks Drawer Bar (Extracted from Video Description) */}
             {chapters.length > 0 && (

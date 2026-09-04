@@ -813,6 +813,11 @@ export function subscribeToActivityLogs(callback: (logs: ActivityLogItem[]) => v
   return () => off(logsRef, 'value', unsubscribe);
 }
 
+export async function clearAllActivityLogs(): Promise<void> {
+  const logsRef = ref(db, 'activity_logs');
+  await set(logsRef, null);
+}
+
 /* =========================================================================
    VIDEOS CRUD & REALTIME
    ========================================================================= */
@@ -918,6 +923,94 @@ export async function recordVideoWatchTime(
       watchTimeSeconds: newSeconds,
       watchHours: watchHours
     });
+  }
+}
+
+export async function recordVideoAdImpression(
+  videoId: string,
+  adType: 'preRoll' | 'banner' | 'short',
+  durationSeconds: number = 0
+): Promise<void> {
+  try {
+    const videoRef = ref(db, `videos/${videoId}`);
+    const snap = await get(videoRef);
+    if (snap.exists()) {
+      const v = snap.val();
+      const currentDuration = Number(v.adWatchDurationSeconds) || 0;
+      const updates: Record<string, any> = {
+        adWatchDurationSeconds: currentDuration + Math.max(0, Math.round(durationSeconds))
+      };
+      if (adType === 'preRoll') {
+        updates.preRollAdsCount = (Number(v.preRollAdsCount) || 0) + 1;
+      } else if (adType === 'banner') {
+        updates.bannerAdsCount = (Number(v.bannerAdsCount) || 0) + 1;
+      } else if (adType === 'short') {
+        updates.shortsAdsCount = (Number(v.shortsAdsCount) || 0) + 1;
+      }
+      await update(videoRef, updates);
+    }
+  } catch (err) {
+    console.warn("recordVideoAdImpression error:", err);
+  }
+}
+
+export async function clearVideoAdStats(videoId: string): Promise<void> {
+  try {
+    const videoRef = ref(db, `videos/${videoId}`);
+    await update(videoRef, {
+      preRollAdsCount: 0,
+      bannerAdsCount: 0,
+      shortsAdsCount: 0,
+      adWatchDurationSeconds: 0
+    });
+  } catch (err) {
+    console.warn("clearVideoAdStats error:", err);
+  }
+}
+
+export async function clearUserVideosAdStats(userUid: string): Promise<void> {
+  try {
+    const videosRef = ref(db, 'videos');
+    const snap = await get(videosRef);
+    if (snap.exists()) {
+      const all = snap.val();
+      const updates: Record<string, any> = {};
+      Object.keys(all).forEach((id) => {
+        if (all[id]?.publisherUid === userUid) {
+          updates[`${id}/preRollAdsCount`] = 0;
+          updates[`${id}/bannerAdsCount`] = 0;
+          updates[`${id}/shortsAdsCount`] = 0;
+          updates[`${id}/adWatchDurationSeconds`] = 0;
+        }
+      });
+      if (Object.keys(updates).length > 0) {
+        await update(videosRef, updates);
+      }
+    }
+  } catch (err) {
+    console.warn("clearUserVideosAdStats error:", err);
+  }
+}
+
+export async function clearAllPlatformAdStats(): Promise<void> {
+  try {
+    const videosRef = ref(db, 'videos');
+    const snap = await get(videosRef);
+    if (snap.exists()) {
+      const all = snap.val();
+      const updates: Record<string, any> = {};
+      Object.keys(all).forEach((id) => {
+        updates[`${id}/preRollAdsCount`] = 0;
+        updates[`${id}/bannerAdsCount`] = 0;
+        updates[`${id}/shortsAdsCount`] = 0;
+        updates[`${id}/adWatchDurationSeconds`] = 0;
+      });
+      if (Object.keys(updates).length > 0) {
+        await update(videosRef, updates);
+      }
+    }
+  } catch (err) {
+    console.warn("clearAllPlatformAdStats error:", err);
   }
 }
 

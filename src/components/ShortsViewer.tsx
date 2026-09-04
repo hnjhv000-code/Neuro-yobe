@@ -13,7 +13,9 @@ import {
   Send,
   Trash2,
   HardDrive,
-  ShieldCheck
+  ShieldCheck,
+  ExternalLink,
+  Sparkles
 } from 'lucide-react';
 import { parseVideoUrl } from '../services/embedHelper';
 import { getDriveEmbedUrl } from '../services/googleDrive';
@@ -26,8 +28,10 @@ import {
   toggleSubscription,
   addToWatchHistory,
   logUserActivity,
-  recordVisitorWatchedVideo
+  recordVisitorWatchedVideo,
+  recordVideoAdImpression
 } from '../services/firebase';
+import { SHORTS_INTERSTITIAL_ADS, type ShortsAdCreative } from '../services/adCatalogue';
 import { getVideoBlobUrl } from '../services/mediaStorage';
 import { useReactionBurst, ReactionBurstOverlay } from './ReactionBurst';
 import { getTranslation } from '../services/translations';
@@ -69,9 +73,29 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
     return shorts;
   }, [shorts, channelFilterUid]);
 
+  // Interleave an ad every 10 shorts
+  const feedItems = React.useMemo<({ kind: 'short'; short: VideoItem } | { kind: 'ad'; ad: ShortsAdCreative; attributedVideoId?: string })[]>(() => {
+    const items: ({ kind: 'short'; short: VideoItem } | { kind: 'ad'; ad: ShortsAdCreative; attributedVideoId?: string })[] = [];
+    let adIdx = 0;
+    for (let i = 0; i < effectiveShorts.length; i++) {
+      items.push({ kind: 'short', short: effectiveShorts[i] });
+      // Every 10 shorts, insert an ad
+      if ((i + 1) % 10 === 0 && effectiveShorts.length >= 10) {
+        const ad = SHORTS_INTERSTITIAL_ADS[adIdx % SHORTS_INTERSTITIAL_ADS.length];
+        adIdx++;
+        items.push({
+          kind: 'ad',
+          ad,
+          attributedVideoId: effectiveShorts[i].id
+        });
+      }
+    }
+    return items;
+  }, [effectiveShorts]);
+
   const [currentIndex, setCurrentIndex] = useState(() => {
     if (initialShortId) {
-      const idx = effectiveShorts.findIndex((s) => s.id === initialShortId);
+      const idx = feedItems.findIndex((it) => it.kind === 'short' && it.short.id === initialShortId);
       return idx >= 0 ? idx : 0;
     }
     return 0;
@@ -92,6 +116,7 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
   const lastTapRef = useRef<number>(0);
   const wheelCooldownRef = useRef(false);
   const touchStartYRef = useRef<number | null>(null);
+  const adStartTimeRef = useRef<number | null>(null);
 
   const { showToast } = useToast();
   const t = (key: string) => getTranslation(language, key);
@@ -99,12 +124,33 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
   // Sync initial short if changed externally
   useEffect(() => {
     if (initialShortId) {
-      const idx = effectiveShorts.findIndex((s) => s.id === initialShortId);
+      const idx = feedItems.findIndex((it) => it.kind === 'short' && it.short.id === initialShortId);
       if (idx >= 0) setCurrentIndex(idx);
     }
-  }, [initialShortId, effectiveShorts]);
+  }, [initialShortId, feedItems]);
 
-  const currentShort = effectiveShorts[currentIndex];
+  const currentItem = feedItems[currentIndex];
+  const currentShort = currentItem && currentItem.kind === 'short' ? currentItem.short : null;
+
+  // Track ad impression & duration
+  useEffect(() => {
+    if (currentItem?.kind === 'ad') {
+      adStartTimeRef.current = Date.now();
+    } else if (adStartTimeRef.current) {
+      const duration = Math.max(1, Math.round((Date.now() - adStartTimeRef.current) / 1000));
+      const targetId = currentShort ? currentShort.id : 'shorts_interstitial';
+      recordVideoAdImpression(targetId, 'short', duration);
+      adStartTimeRef.current = null;
+    }
+
+    return () => {
+      if (adStartTimeRef.current) {
+        const duration = Math.max(1, Math.round((Date.now() - adStartTimeRef.current) / 1000));
+        recordVideoAdImpression('shorts_interstitial', 'short', duration);
+        adStartTimeRef.current = null;
+      }
+    };
+  }, [currentIndex, currentItem, currentShort]);
 
   // Subscribe to comments for active short
   useEffect(() => {
@@ -148,7 +194,7 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
   }, [currentIndex, currentShort?.id, currentUser?.uid]);
 
   const handleNext = () => {
-    if (currentIndex < effectiveShorts.length - 1) {
+    if (currentIndex < feedItems.length - 1) {
       setCurrentIndex((prev) => prev + 1);
     }
   };
@@ -208,7 +254,7 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, effectiveShorts.length, onClose]);
+  }, [currentIndex, feedItems.length, onClose]);
 
   const handleDoubleTap = (e: React.MouseEvent) => {
     const now = Date.now();
@@ -346,7 +392,7 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
         </button>
         <button
           onClick={handleNext}
-          disabled={currentIndex === effectiveShorts.length - 1}
+          disabled={currentIndex === feedItems.length - 1}
           className="p-3.5 rounded-full bg-[#091224]/80 hover:bg-cyan-950 border border-cyan-900/60 disabled:opacity-30 text-white shadow-xl backdrop-blur-xl transition-all cursor-pointer"
           title="التالي (سهم لأسفل)"
         >
@@ -373,190 +419,281 @@ export const ShortsViewer: React.FC<ShortsViewerProps> = ({
           isModal ? 'rounded-none sm:rounded-3xl' : 'rounded-3xl'
         } overflow-hidden bg-[#070e1c] border border-cyan-900/40 shadow-2xl shadow-cyan-950/80 flex items-center justify-center select-none`}
       >
-        {/* Channel Scope Badge when browsing channel's shorts */}
-        {channelFilterUid && currentShort && (
-          <div className="absolute top-4 start-16 z-30 pointer-events-none flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#050a14]/80 backdrop-blur-md border border-cyan-500/40 text-[10px] text-cyan-300 font-bold shadow-lg">
-            <span>شورتس القناة: {currentShort.publisherName}</span>
-            <span className="text-cyan-400/70 font-mono">({currentIndex + 1}/{effectiveShorts.length})</span>
-          </div>
-        )}
-        {/* Video / Iframe */}
-        {parsed && parsed.isEmbed && parsed.embedUrl ? (
-          <div className="relative w-full h-full">
-            <iframe
-              src={parsed.embedUrl}
-              title={currentShort.title}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              className="w-full h-full object-cover border-0"
-            />
-            {/* Anti-Popout Protective Overlay: Prevents clicking "Open in new window" button */}
-            {isGoogleDrive && (
-              <>
-                <div
-                  className="absolute top-0 end-0 h-14 w-16 z-20 cursor-default select-none pointer-events-auto bg-transparent"
-                  title="مشغل محمي - تم تفعيل الحماية المشددة للمحتوى"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    showToast('حماية المحتوى: تم حظر فتح أو مشاركة الرابط المباشر', 'info');
-                  }}
-                />
-                <div className="absolute top-4 end-4 z-10 pointer-events-none flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#050a14]/85 backdrop-blur-md border border-cyan-500/40 text-[10px] text-cyan-300 font-bold shadow-lg">
-                  <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>بث سحابي محمي</span>
-                </div>
-              </>
-            )}
-          </div>
-        ) : (
-          <video
-            src={localBlobUrls[currentShort.id] || currentShort.videoDataUrl || (parsed ? parsed.directUrl : '') || currentShort.thumbnailDataUrl}
-            autoPlay
-            loop
-            playsInline
-            muted={isMuted}
-            poster={currentShort.thumbnailDataUrl}
-            className="w-full h-full object-cover"
-          />
-        )}
-
-        {/* Double-Tap Heart Animation */}
-        {showHeartAnim && (
-          <div
-            style={{ left: heartCoords.x, top: heartCoords.y }}
-            className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-40 animate-ping duration-700"
-          >
-            <Heart className="w-24 h-24 text-rose-500 fill-rose-500 drop-shadow-[0_0_20px_rgba(244,63,94,0.9)]" />
-          </div>
-        )}
-
-        {/* Top Sound Control */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setIsMuted(!isMuted);
-          }}
-          className="absolute top-4 start-4 z-30 p-2.5 rounded-full bg-black/60 backdrop-blur-md text-white border border-white/20 hover:scale-110 transition-all"
-        >
-          {isMuted ? <VolumeX className="w-5 h-5 text-rose-400" /> : <Volume2 className="w-5 h-5 text-cyan-400" />}
-        </button>
-
-        {/* Right Interaction Rail */}
-        <div className="absolute end-3 bottom-20 z-30 flex flex-col items-center gap-4 relative">
-          <ReactionBurstOverlay particles={shortsParticles} />
-          {/* Like */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleLike('like');
-            }}
-            className="flex flex-col items-center gap-1 group"
-          >
-            <div
-              className={`p-3 rounded-full backdrop-blur-xl border transition-all ${
-                userLikedStatus === 'like'
-                  ? 'bg-cyan-500 text-black border-cyan-300 shadow-[0_0_15px_#06b6d4]'
-                  : 'bg-black/60 text-white border-white/20 group-hover:bg-cyan-950'
-              }`}
-            >
-              <ThumbsUp className="w-5 h-5" />
-            </div>
-            {currentShort.showLikesCount && (
-              <span className="text-xs font-bold text-white drop-shadow-md">{currentShort.likes || 0}</span>
-            )}
-          </button>
-
-          {/* Dislike */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleLike('dislike');
-            }}
-            className="flex flex-col items-center gap-1 group"
-          >
-            <div
-              className={`p-3 rounded-full backdrop-blur-xl border transition-all ${
-                userLikedStatus === 'dislike'
-                  ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_#f43f5e]'
-                  : 'bg-black/60 text-white border-white/20 group-hover:bg-rose-950'
-              }`}
-            >
-              <ThumbsDown className="w-5 h-5" />
-            </div>
-          </button>
-
-          {/* Comments */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowComments(true);
-            }}
-            className="flex flex-col items-center gap-1 group"
-          >
-            <div className="p-3 rounded-full bg-black/60 text-white border border-white/20 group-hover:bg-cyan-950 backdrop-blur-xl transition-all">
-              <MessageSquare className="w-5 h-5" />
-            </div>
-            <span className="text-xs font-bold text-white drop-shadow-md">{comments.length}</span>
-          </button>
-
-          {/* Share */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleShare();
-            }}
-            className="p-3 rounded-full bg-black/60 text-white border border-white/20 hover:bg-cyan-950 backdrop-blur-xl transition-all"
-          >
-            <Share2 className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Bottom Overlay: Publisher & Title */}
-        <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/95 via-black/60 to-transparent z-20 flex flex-col gap-2">
-          {/* Publisher */}
-          <div className="flex items-center gap-2.5">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onSelectChannel) onSelectChannel(currentShort.publisherUid);
-              }}
-            >
-              <img
-                src={currentShort.publisherAvatar}
-                alt=""
-                className="w-9 h-9 rounded-full object-cover border border-cyan-400/60"
+        {currentItem?.kind === 'ad' ? (
+          <div className="relative w-full h-full flex flex-col justify-between overflow-hidden bg-black select-none animate-in fade-in duration-200">
+            {currentItem.ad.mediaType === 'video' ? (
+              <video
+                src={currentItem.ad.mediaUrl}
+                autoPlay
+                loop
+                playsInline
+                muted={isMuted}
+                className="absolute inset-0 w-full h-full object-cover"
               />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onSelectChannel) onSelectChannel(currentShort.publisherUid);
-              }}
-              className="text-xs font-bold text-white hover:text-cyan-300 drop-shadow"
-            >
-              @{currentShort.publisherName}
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleSubscribe();
-              }}
-              className={`px-3 py-1 rounded-full text-[11px] font-bold shadow-md transition-all ${
-                isSubscribed
-                  ? 'bg-slate-700/80 text-slate-300'
-                  : 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white'
-              }`}
-            >
-              {isSubscribed ? t('subscribed') : t('subscribe')}
-            </button>
-          </div>
+            ) : (
+              <img
+                src={currentItem.ad.mediaUrl}
+                alt={currentItem.ad.title}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            )}
 
-          {/* Caption */}
-          <p className="text-xs text-slate-100 font-medium line-clamp-2 drop-shadow">
-            {currentShort.title}
-          </p>
-        </div>
+            {/* Dark Vignettes */}
+            <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/90 via-black/40 to-transparent pointer-events-none" />
+            <div className="absolute inset-x-0 bottom-0 h-52 bg-gradient-to-t from-black/95 via-black/70 to-transparent pointer-events-none" />
+
+            {/* Top Sound Control */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsMuted(!isMuted);
+              }}
+              className="absolute top-4 start-4 z-30 p-2.5 rounded-full bg-black/60 backdrop-blur-md text-white border border-white/20 hover:scale-110 transition-all"
+            >
+              {isMuted ? <VolumeX className="w-5 h-5 text-rose-400" /> : <Volume2 className="w-5 h-5 text-cyan-400" />}
+            </button>
+
+            {/* Top Badge: Sponsored */}
+            <div className="relative z-20 p-4 pt-14 flex items-center justify-between pointer-events-none">
+              <div className="flex items-center gap-2">
+                <span className="px-3 py-1 rounded-md bg-amber-500 text-slate-950 font-black text-xs shadow-md tracking-wider">
+                  إعلان ممول
+                </span>
+                <span className="text-[11px] font-bold text-slate-200 bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-full border border-white/10">
+                  Google AdSense
+                </span>
+              </div>
+            </div>
+
+            {/* Center / Bottom CTA Content */}
+            <div className="relative z-20 p-5 pb-8 flex flex-col gap-3">
+              {/* Advertiser Profile */}
+              <div className="flex items-center gap-2.5">
+                <img
+                  src={currentItem.ad.advertiserAvatar}
+                  alt=""
+                  className="w-10 h-10 rounded-full object-cover border-2 border-amber-400 shadow-md"
+                />
+                <div>
+                  <h4 className="text-sm font-extrabold text-white drop-shadow">
+                    {currentItem.ad.advertiserName}
+                  </h4>
+                  <span className="text-[10px] text-amber-300 font-bold">معلن موثوق ومفعل</span>
+                </div>
+              </div>
+
+              <h3 className="text-sm sm:text-base font-black text-white line-clamp-2 drop-shadow leading-snug">
+                {currentItem.ad.title}
+              </h3>
+              <p className="text-xs text-slate-300 line-clamp-2 drop-shadow leading-relaxed">
+                {currentItem.ad.description}
+              </p>
+
+              {/* Action CTA Button */}
+              <a
+                href={currentItem.ad.websiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs sm:text-sm text-center shadow-xl shadow-amber-950/60 transition-transform active:scale-95 flex items-center justify-center gap-2 mt-1"
+              >
+                <span>{currentItem.ad.ctaText}</span>
+                <ExternalLink className="w-4 h-4" />
+              </a>
+
+              <div className="text-center text-[10px] font-mono text-slate-400">
+                اسحب للأعلى أو للأسفل للتخطي ↕
+              </div>
+            </div>
+          </div>
+        ) : currentShort ? (
+          <>
+            {/* Channel Scope Badge when browsing channel's shorts */}
+            {channelFilterUid && (
+              <div className="absolute top-4 start-16 z-30 pointer-events-none flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#050a14]/80 backdrop-blur-md border border-cyan-500/40 text-[10px] text-cyan-300 font-bold shadow-lg">
+                <span>شورتس القناة: {currentShort.publisherName}</span>
+                <span className="text-cyan-400/70 font-mono">({currentIndex + 1}/{effectiveShorts.length})</span>
+              </div>
+            )}
+            {/* Video / Iframe */}
+            {parsed && parsed.isEmbed && parsed.embedUrl ? (
+              <div className="relative w-full h-full">
+                <iframe
+                  src={parsed.embedUrl}
+                  title={currentShort.title}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  className="w-full h-full object-cover border-0"
+                />
+                {/* Anti-Popout Protective Overlay: Prevents clicking "Open in new window" button */}
+                {isGoogleDrive && (
+                  <>
+                    <div
+                      className="absolute top-0 end-0 h-14 w-16 z-20 cursor-default select-none pointer-events-auto bg-transparent"
+                      title="مشغل محمي - تم تفعيل الحماية المشددة للمحتوى"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        showToast('حماية المحتوى: تم حظر فتح أو مشاركة الرابط المباشر', 'info');
+                      }}
+                    />
+                    <div className="absolute top-4 end-4 z-10 pointer-events-none flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#050a14]/85 backdrop-blur-md border border-cyan-500/40 text-[10px] text-cyan-300 font-bold shadow-lg">
+                      <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>بث سحابي محمي</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <video
+                src={localBlobUrls[currentShort.id] || currentShort.videoDataUrl || (parsed ? parsed.directUrl : '') || currentShort.thumbnailDataUrl}
+                autoPlay
+                loop
+                playsInline
+                muted={isMuted}
+                poster={currentShort.thumbnailDataUrl}
+                className="w-full h-full object-cover"
+              />
+            )}
+
+            {/* Double-Tap Heart Animation */}
+            {showHeartAnim && (
+              <div
+                style={{ left: heartCoords.x, top: heartCoords.y }}
+                className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none z-40 animate-ping duration-700"
+              >
+                <Heart className="w-24 h-24 text-rose-500 fill-rose-500 drop-shadow-[0_0_20px_rgba(244,63,94,0.9)]" />
+              </div>
+            )}
+
+            {/* Top Sound Control */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsMuted(!isMuted);
+              }}
+              className="absolute top-4 start-4 z-30 p-2.5 rounded-full bg-black/60 backdrop-blur-md text-white border border-white/20 hover:scale-110 transition-all"
+            >
+              {isMuted ? <VolumeX className="w-5 h-5 text-rose-400" /> : <Volume2 className="w-5 h-5 text-cyan-400" />}
+            </button>
+
+            {/* Right Interaction Rail */}
+            <div className="absolute end-3 bottom-20 z-30 flex flex-col items-center gap-4 relative">
+              <ReactionBurstOverlay particles={shortsParticles} />
+              {/* Like */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleLike('like');
+                }}
+                className="flex flex-col items-center gap-1 group"
+              >
+                <div
+                  className={`p-3 rounded-full backdrop-blur-xl border transition-all ${
+                    userLikedStatus === 'like'
+                      ? 'bg-cyan-500 text-black border-cyan-300 shadow-[0_0_15px_#06b6d4]'
+                      : 'bg-black/60 text-white border-white/20 group-hover:bg-cyan-950'
+                  }`}
+                >
+                  <ThumbsUp className="w-5 h-5" />
+                </div>
+                {currentShort.showLikesCount && (
+                  <span className="text-xs font-bold text-white drop-shadow-md">{currentShort.likes || 0}</span>
+                )}
+              </button>
+
+              {/* Dislike */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleLike('dislike');
+                }}
+                className="flex flex-col items-center gap-1 group"
+              >
+                <div
+                  className={`p-3 rounded-full backdrop-blur-xl border transition-all ${
+                    userLikedStatus === 'dislike'
+                      ? 'bg-rose-600 text-white border-rose-400 shadow-[0_0_15px_#f43f5e]'
+                      : 'bg-black/60 text-white border-white/20 group-hover:bg-rose-950'
+                  }`}
+                >
+                  <ThumbsDown className="w-5 h-5" />
+                </div>
+              </button>
+
+              {/* Comments */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowComments(true);
+                }}
+                className="flex flex-col items-center gap-1 group"
+              >
+                <div className="p-3 rounded-full bg-black/60 text-white border border-white/20 group-hover:bg-cyan-950 backdrop-blur-xl transition-all">
+                  <MessageSquare className="w-5 h-5" />
+                </div>
+                <span className="text-xs font-bold text-white drop-shadow-md">{comments.length}</span>
+              </button>
+
+              {/* Share */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleShare();
+                }}
+                className="p-3 rounded-full bg-black/60 text-white border border-white/20 hover:bg-cyan-950 backdrop-blur-xl transition-all"
+              >
+                <Share2 className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Bottom Overlay: Publisher & Title */}
+            <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/95 via-black/60 to-transparent z-20 flex flex-col gap-2">
+              {/* Publisher */}
+              <div className="flex items-center gap-2.5">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onSelectChannel) onSelectChannel(currentShort.publisherUid);
+                  }}
+                >
+                  <img
+                    src={currentShort.publisherAvatar}
+                    alt=""
+                    className="w-9 h-9 rounded-full object-cover border border-cyan-400/60"
+                  />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onSelectChannel) onSelectChannel(currentShort.publisherUid);
+                  }}
+                  className="text-xs font-bold text-white hover:text-cyan-300 drop-shadow"
+                >
+                  @{currentShort.publisherName}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSubscribe();
+                  }}
+                  className={`px-3 py-1 rounded-full text-[11px] font-bold shadow-md transition-all ${
+                    isSubscribed
+                      ? 'bg-slate-700/80 text-slate-300'
+                      : 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white'
+                  }`}
+                >
+                  {isSubscribed ? t('subscribed') : t('subscribe')}
+                </button>
+              </div>
+
+              {/* Caption */}
+              <p className="text-xs text-slate-100 font-medium line-clamp-2 drop-shadow">
+                {currentShort.title}
+              </p>
+            </div>
+          </>
+        ) : null}
       </div>
 
       {/* Slide-over Comments Drawer */}
