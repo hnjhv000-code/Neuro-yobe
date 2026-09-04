@@ -41,11 +41,15 @@ import {
   Check,
   MapPin,
   Tablet,
-  Megaphone
+  Megaphone,
+  ExternalLink,
+  Loader2
 } from 'lucide-react';
 import { CosmicLogo } from './CosmicLogo';
 import { CosmicSiteNotice } from './CosmicSiteNotice';
 import { DevTabSearchBar } from './DevTabSearchBar';
+import { SecurityDashboardTab } from './SecurityDashboardTab';
+import { loginDeveloper, logoutDeveloper } from '../services/securityService';
 import { compressDeviceImage } from '../services/mediaStorage';
 import {
   subscribeToAllUsers,
@@ -110,6 +114,7 @@ interface DeveloperPanelProps {
 
 type TabType =
   | 'visitors'
+  | 'security'
   | 'complaints'
   | 'blacklist'
   | 'analytics'
@@ -136,6 +141,7 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
   const [isAuthenticated, setIsAuthenticated] = useState(propIsAuthenticated);
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   useEffect(() => {
     setIsAuthenticated(propIsAuthenticated);
@@ -262,18 +268,31 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
     };
   }, [isAuthenticated]);
 
-  // Handle Developer Login (password: Yassa 20)
-  const handleLogin = (e: React.FormEvent) => {
+  // Handle Developer Login via Secure Backend API
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (passwordInput === 'Yassa 20') {
-      setIsAuthenticated(true);
-      if (onAuthenticate) {
-        onAuthenticate(true);
+    if (!passwordInput.trim()) return;
+
+    setIsLoggingIn(true);
+    setAuthError('');
+
+    try {
+      const res = await loginDeveloper(passwordInput);
+      if (res.success) {
+        setIsAuthenticated(true);
+        if (onAuthenticate) {
+          onAuthenticate(true);
+        }
+        setPasswordInput('');
+        setAuthError('');
+        showToast('مرحباً بك في لوحة تحكم المطور NeuroYobe - تم التحقق الآمن من الخادم', 'success');
+      } else {
+        setAuthError(res.error || 'كلمة المرور غير صحيحة! تم منع الوصول وتسجيل المحاولة.');
       }
-      setAuthError('');
-      showToast('مرحباً بك في لوحة تحكم المطور NeuroYobe', 'success');
-    } else {
-      setAuthError('كلمة المرور غير صحيحة! تم منع الوصول.');
+    } catch {
+      setAuthError('حدث خطأ في الاتصال بخادم الحماية.');
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -631,10 +650,20 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
 
             <button
               type="submit"
-              className="w-full py-3 bg-gradient-to-r from-cyan-600 via-sky-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl text-xs font-black shadow-lg shadow-cyan-950/80 transition-all flex items-center justify-center gap-2"
+              disabled={isLoggingIn}
+              className="w-full py-3 bg-gradient-to-r from-cyan-600 via-sky-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-lg shadow-cyan-950/80 transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
-              <ShieldCheck className="w-4 h-4" />
-              <span>دخول لوحة المطور</span>
+              {isLoggingIn ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>جارٍ التحقق وتأمين الجلسة...</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>دخول لوحة المطور (مصادقة مشفرة)</span>
+                </>
+              )}
             </button>
           </form>
         </div>
@@ -645,6 +674,7 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
   // Navigation Items (Arabic strictly as mandated)
   const navTabs: { id: TabType; label: string; icon: any; badge?: number }[] = [
     { id: 'visitors', label: 'الزوار والتتبع', icon: Globe, badge: visitors.length },
+    { id: 'security', label: 'قاعدة الحماية والأمان', icon: ShieldCheck },
     { id: 'complaints', label: 'الشكاوى والإبلاغات', icon: ShieldAlert, badge: complaints.filter(c => c.status === 'pending').length || undefined },
     { id: 'blacklist', label: 'القائمة السوداء ومنع النشر', icon: UserX, badge: blacklist.length || undefined },
     { id: 'analytics', label: 'الإحصائيات', icon: BarChart3 },
@@ -675,10 +705,11 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
 
         <div className="flex items-center gap-3">
           <button
-            onClick={() => {
+            onClick={async () => {
+              await logoutDeveloper();
               if (onAuthenticate) onAuthenticate(false);
               setIsAuthenticated(false);
-              showToast('تم قفل لوحة المطور. ستحتاج لكلمة المرور للدخول مجدداً.', 'info');
+              showToast('تم قفل لوحة المطور وإبطال توكن الجلسة.', 'info');
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-950/70 hover:bg-rose-900/90 border border-rose-800 text-xs font-bold text-rose-300 transition-colors"
             title="قفل لوحة المطور"
@@ -732,6 +763,21 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
 
         {/* Content Viewport */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 bg-[#060b18]">
+          {/* TAB: قاعدة الحماية (Security Base Dashboard) */}
+          {activeTab === 'security' && (
+            <div className="space-y-4">
+              <DevTabSearchBar
+                value={getTabSearch('security')}
+                onChange={(val) => setTabSearch('security', val)}
+                placeholder="ابحث في سجل الأحداث الأمنية، عناوين IP، نوع الهجوم، المسارات، والنتائج..."
+              />
+              <SecurityDashboardTab
+                searchQuery={getTabSearch('security')}
+                showToast={showToast}
+              />
+            </div>
+          )}
+
           {/* TAB: الزوار والتتبع (Visitors Intelligence) */}
           {activeTab === 'visitors' && (() => {
             const filteredVisitors = visitors.filter((v) => {
@@ -1827,6 +1873,54 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
                       </div>
                     );
                   })()}
+
+                  {/* Google AdSense ads.txt Verification & Inspection */}
+                  <div className="mt-4 p-4 rounded-xl bg-[#070e1c] border border-cyan-800/80 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <h4 className="text-xs font-black text-slate-100 flex items-center gap-2">
+                          <span>ملف التحقق الرسمي لـ Google AdSense (ads.txt)</span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-700/60">
+                            مفعل وجاهز للفحص في /ads.txt
+                          </span>
+                        </h4>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            window.open('/ads.txt', '_blank');
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-cyan-950 border border-cyan-700/70 text-cyan-200 hover:bg-cyan-900 text-xs font-bold transition-colors flex items-center gap-1.5"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>فتح وفحص /ads.txt مباشرة</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText('google.com, pub-3905915653534385, DIRECT, f08c47fec0942fa0');
+                            showToast('تم نسخ سطر ads.txt المعتمد إلى الحافظة', 'success');
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 text-xs font-bold transition-colors flex items-center gap-1.5"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>نسخ الكود</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 rounded-lg bg-black/70 border border-cyan-950 font-mono text-[11px] text-cyan-300 select-all flex items-center justify-between">
+                      <code>google.com, pub-3905915653534385, DIRECT, f08c47fec0942fa0</code>
+                      <span className="text-[10px] text-slate-500 font-sans">معرف الناشر: pub-3905915653534385</span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      ملف <code className="text-cyan-300">ads.txt</code> موجود الآن في مكانه المعتمد <code className="text-cyan-300">/public/ads.txt</code> وفي الجذر الرئيسي <code className="text-cyan-300">/ads.txt</code>، ويتم نشره مباشرة إلى مسار الموقع الأساسي لتقرأه عناكب فحص Google AdSense بكل وضوح دون أي حجب أو إعادة توجيه.
+                    </p>
+                  </div>
                 </div>
               </div>
             );

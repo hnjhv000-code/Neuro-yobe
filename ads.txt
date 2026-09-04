@@ -1,0 +1,3 @@
+# Google AdSense ads.txt
+# Publisher: pub-3905915653534385
+google.com, pub-3905915653534385, DIRECT, f08c47fec0942fa0

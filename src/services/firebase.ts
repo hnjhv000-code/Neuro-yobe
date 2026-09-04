@@ -56,16 +56,17 @@ import type {
 } from '../types';
 import { STARTER_VIDEOS, STARTER_POSTS, saveCachedVideos, saveCachedPosts } from './sampleData';
 
-// Provided exact Firebase config
+// Firebase config with support for environment variables and safe fallback
+const env = (import.meta as any).env || {};
 const firebaseConfig = {
-  apiKey: "AIzaSyAl4q3kJ1UFp406flser2xcqxCgBhMz_14",
-  authDomain: "hnahalak.firebaseapp.com",
-  databaseURL: "https://hnahalak-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "hnahalak",
-  storageBucket: "hnahalak.firebasestorage.app",
-  messagingSenderId: "1082843860070",
-  appId: "1:1082843860070:web:87b1ec90dd3b2c140531a7",
-  measurementId: "G-K486T3J2TH"
+  apiKey: env.VITE_FIREBASE_API_KEY || "AIzaSyAl4q3kJ1UFp406flser2xcqxCgBhMz_14",
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || "hnahalak.firebaseapp.com",
+  databaseURL: env.VITE_FIREBASE_DATABASE_URL || "https://hnahalak-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: env.VITE_FIREBASE_PROJECT_ID || "hnahalak",
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || "hnahalak.firebasestorage.app",
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || "1082843860070",
+  appId: env.VITE_FIREBASE_APP_ID || "1:1082843860070:web:87b1ec90dd3b2c140531a7",
+  measurementId: env.VITE_FIREBASE_MEASUREMENT_ID || "G-K486T3J2TH"
 };
 
 // Initialize Firebase once
